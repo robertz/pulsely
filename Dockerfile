@@ -18,7 +18,8 @@ RUN sed -i 's/class : "ConsoleAppender"/class : "coldbox.system.logging.appender
     lib/coldbox/system/web/config/LogBox.cfc
 
 ENV ENVIRONMENT=production \
-    BOXLANG_DEBUG=false
+    BOXLANG_DEBUG=false \
+    BOX_SERVER_APP_CFENGINE=boxlang@1.7.0+45
 
 # Intentionally no CMD/ENTRYPOINT override: the base image's own run.sh
 # starts the server on $PORT (8080 by default) and provides its own
