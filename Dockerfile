@@ -5,9 +5,9 @@ WORKDIR /app
 COPY . .
 
 # lib/ and boxlang_modules/ are gitignored, installed from ForgeBox at build time
-RUN box install --verbose 2>&1 | tee /tmp/install.log; \
-    echo "=== boxlang_modules ==="; ls -la boxlang_modules 2>&1; \
-    echo "=== grep bx- from install log ==="; grep -i "bx-mysql\|bx-compat-cfml\|bx-esapi\|error\|fail" /tmp/install.log 2>&1; \
+RUN box install; \
+    echo "=== searching for bx-mysql anywhere ==="; grep -rl "bx-mysql" / --include=box.json 2>/dev/null; \
+    echo "=== searching filesystem for dir named bx-mysql ==="; ls -la /app /app/* /root/.CommandBox/artifacts 2>&1 | head -80; \
     true
 
 ENV ENVIRONMENT=production \
