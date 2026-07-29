@@ -7,9 +7,17 @@ domains:
   - domain: www.pulsely.dev
     type: ALIAS
 
+databases:
+  - name: amos
+    cluster_name: amos
+    db_name: pulsely
+    db_user: rob
+    engine: MYSQL
+    production: true
+
 services:
-  - name: web
-    dockerfile_path: Dockerfile
+  - name: pulsely
+    dockerfile_path: /Dockerfile
     source_dir: /
     github:
       repo: robertz/pulsely
@@ -17,11 +25,12 @@ services:
       deploy_on_push: true
     http_port: 8080
     instance_count: 1
-    instance_size_slug: apps-s-1vcpu-1gb
+    instance_size_slug: apps-s-1vcpu-2gb
     health_check:
       http_path: /
-      initial_delay_seconds: 30
+      initial_delay_seconds: 90
       period_seconds: 10
+      failure_threshold: 6
     envs:
       - key: ENVIRONMENT
         value: production
@@ -30,28 +39,26 @@ services:
       - key: DB_DRIVER
         value: MySQL
       - key: DB_HOST
-        value: private-amos-do-user-672117-0.i.db.ondigitalocean.com
+        value: ${production-database.HOSTNAME}
       - key: DB_PORT
-        value: "25060"
+        value: ${production-database.PORT}
       - key: DB_DATABASE
-        value: dismal
+        value: ${production-database.DATABASE}
       - key: DB_USER
-        value: rob
+        value: ${production-database.USERNAME}
       - key: DB_PASSWORD
-        value: EDIT_IN_UI
+        value: ${production-database.PASSWORD}
         type: SECRET
       - key: DB_USE_SSL
         value: "true"
-      - key: DB_CONNECTIONSTRING
-        value: "jdbc:mysql://private-amos-do-user-672117-0.i.db.ondigitalocean.com:25060/dismal?useSSL=true&requireSSL=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC&useLegacyDatetimeCode=true&allowPublicKeyRetrieval=true"
       - key: JWT_SECRET
-        value: REPLACE_ME
+        value: EDIT_IN_UI
         type: SECRET
       - key: S3_ACCESS_KEY
-        value: REPLACE_ME
+        value: EDIT_IN_UI
         type: SECRET
       - key: S3_SECRET_KEY
-        value: REPLACE_ME
+        value: EDIT_IN_UI
         type: SECRET
       - key: S3_REGION
         value: nyc3

@@ -1,7 +1,7 @@
 {
     "name":"pulsely",
     "app":{
-        "cfengine":"boxlang@1",
+        "cfengine":"boxlang@1.7.0",
         "engineConfigFile":"./runtime/boxlang.json"
     },
     "jvm":{
