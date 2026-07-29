@@ -6,7 +6,8 @@ COPY . .
 
 # lib/ and boxlang_modules/ are gitignored, installed from ForgeBox at build time
 RUN box install; \
-    echo "=== boxlang_modules ==="; ls -la boxlang_modules 2>&1; \
+    sleep 8; \
+    echo "=== boxlang_modules after sleep ==="; ls -la boxlang_modules 2>&1; \
     true
 
 ENV ENVIRONMENT=production \
