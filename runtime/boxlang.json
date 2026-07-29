@@ -312,13 +312,13 @@
 		// runs outside the web application and still needs database access.
 		"pulsely":{
 			"connectionLimit":"100",
-			"custom":"useUnicode=true&characterEncoding=UTF8&serverTimezone=UTC&useLegacyDatetimeCode=true&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true",
-			"database":"pulsely",
+			"custom":"useUnicode=true&characterEncoding=UTF8&serverTimezone=UTC&useLegacyDatetimeCode=true&autoReconnect=true&useSSL=${DB_USE_SSL:false}&requireSSL=${DB_USE_SSL:false}&allowPublicKeyRetrieval=true",
+			"database":"${DB_DATABASE:pulsely}",
 			"driver":"mysql",
-			"host":"127.0.0.1",
-			"password":"",
-			"port":"3306",
-			"username":"root"
+			"host":"${DB_HOST:127.0.0.1}",
+			"password":"${DB_PASSWORD:}",
+			"port":"${DB_PORT:3306}",
+			"username":"${DB_USER:root}"
 		},
 		"coldbox":{
 			"connectionLimit":"100",

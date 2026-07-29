@@ -1,0 +1,59 @@
+name: pulsely
+region: nyc
+
+domains:
+  - domain: pulsely.dev
+    type: PRIMARY
+  - domain: www.pulsely.dev
+    type: ALIAS
+
+services:
+  - name: web
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: robertz/pulsely
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /
+      initial_delay_seconds: 30
+      period_seconds: 10
+    envs:
+      - key: ENVIRONMENT
+        value: production
+      - key: BOXLANG_DEBUG
+        value: "false"
+      - key: DB_DRIVER
+        value: MySQL
+      - key: DB_HOST
+        value: private-amos-do-user-672117-0.i.db.ondigitalocean.com
+      - key: DB_PORT
+        value: "25060"
+      - key: DB_DATABASE
+        value: dismal
+      - key: DB_USER
+        value: rob
+      - key: DB_PASSWORD
+        value: EDIT_IN_UI
+        type: SECRET
+      - key: DB_USE_SSL
+        value: "true"
+      - key: DB_CONNECTIONSTRING
+        value: "jdbc:mysql://private-amos-do-user-672117-0.i.db.ondigitalocean.com:25060/dismal?useSSL=true&requireSSL=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC&useLegacyDatetimeCode=true&allowPublicKeyRetrieval=true"
+      - key: JWT_SECRET
+        value: REPLACE_ME
+        type: SECRET
+      - key: S3_ACCESS_KEY
+        value: REPLACE_ME
+        type: SECRET
+      - key: S3_SECRET_KEY
+        value: REPLACE_ME
+        type: SECRET
+      - key: S3_REGION
+        value: nyc3
+      - key: S3_DOMAIN
+        value: digitaloceanspaces.com
