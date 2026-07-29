@@ -5,7 +5,13 @@ WORKDIR /app
 COPY . .
 
 # lib/ and boxlang_modules/ are gitignored, installed from ForgeBox at build time
-RUN box install --production && grep -m1 '"version"' lib/coldbox/box.json
+RUN box install --production && \
+    grep -m1 '"version"' lib/coldbox/box.json && \
+    grep -m1 '"version"' boxlang_modules/bx-compat-cfml/box.json && \
+    grep -m1 '"version"' boxlang_modules/bx-esapi/box.json && \
+    grep -m1 '"version"' boxlang_modules/bx-mysql/box.json && \
+    grep -m1 '"version"' lib/modules/socketbox/box.json && \
+    grep -m1 '"version"' lib/modules/cbcsrf/box.json
 
 ENV ENVIRONMENT=production \
     BOXLANG_DEBUG=false
