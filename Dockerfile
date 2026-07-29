@@ -5,7 +5,7 @@ WORKDIR /app
 COPY . .
 
 # lib/ and boxlang_modules/ are gitignored, installed from ForgeBox at build time
-RUN box install --production
+RUN box install --production && grep -m1 '"version"' lib/coldbox/box.json
 
 ENV ENVIRONMENT=production \
     BOXLANG_DEBUG=false
