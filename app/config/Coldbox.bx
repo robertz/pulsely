@@ -25,6 +25,16 @@ class {
 			development : "localhost,127\.0\.0\.1"
 		};
 
+		// ColdBox's own default LogBox config registers the console appender by
+		// its short class name ("ConsoleAppender"), which Adobe/Lucee resolve via
+		// an implicit search path. BoxLang's class resolver doesn't do that
+		// implicit lookup, so it throws ClassNotFoundBoxLangException on boot -
+		// use the fully-qualified path instead.
+		variables.logBox = {
+			appenders : { console : { class : "coldbox.system.logging.appenders.ConsoleAppender" } },
+			root      : { levelmax : "INFO", appenders : "*" }
+		};
+
 		variables.moduleSettings = {
 			cbcsrf : {
 				// Verification is done in Dashboard.preHandler() rather than by the
