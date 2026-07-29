@@ -5,10 +5,17 @@ WORKDIR /app
 COPY . .
 
 # lib/ and boxlang_modules/ are gitignored, installed from ForgeBox at build time
-RUN box install; \
-    echo "=== searching for bx-mysql anywhere ==="; grep -rl "bx-mysql" / --include=box.json 2>/dev/null; \
-    echo "=== searching filesystem for dir named bx-mysql ==="; ls -la /app /app/* /root/.CommandBox/artifacts 2>&1 | head -80; \
-    true
+RUN box install --production
+
+# ColdBox's LoaderService.createDefaultLogBox() unconditionally bootstraps
+# using coldbox.system.web.config.LogBox, before any app-level LogBox
+# config is ever consulted. That vendored default registers the console
+# appender by its short class name ("ConsoleAppender"), which Adobe/Lucee
+# resolve via an implicit search path - BoxLang's class resolver doesn't,
+# so it throws ClassNotFoundBoxLangException on every boot. Patch the
+# vendored file post-install since it's reinstalled fresh on every build.
+RUN sed -i 's/class : "ConsoleAppender"/class : "coldbox.system.logging.appenders.ConsoleAppender"/' \
+    lib/coldbox/system/web/config/LogBox.cfc
 
 ENV ENVIRONMENT=production \
     BOXLANG_DEBUG=false
