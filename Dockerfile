@@ -7,12 +7,9 @@ COPY . .
 # lib/ and boxlang_modules/ are gitignored, installed from ForgeBox at build time
 RUN box install --production
 
-ENV BOX_SERVER_WEB_HOST=0.0.0.0 \
-    BOX_SERVER_WEB_HTTP_PORT=8080 \
-    BOX_SERVER_APP_CFENGINE=boxlang@1 \
-    ENVIRONMENT=production \
+ENV ENVIRONMENT=production \
     BOXLANG_DEBUG=false
 
-EXPOSE 8080
-
-CMD ["box", "server", "start", "--console", "port=8080", "host=0.0.0.0"]
+# Intentionally no CMD/ENTRYPOINT override: the base image's own run.sh
+# starts the server on $PORT (8080 by default) and provides its own
+# HEALTHCHECK against http://127.0.0.1:8080/.
