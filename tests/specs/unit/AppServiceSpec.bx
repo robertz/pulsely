@@ -1,0 +1,105 @@
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll() {
+		variables.apps = new app.models.AppService();
+	}
+
+	function run() {
+
+		describe( "isValidAppId()", () => {
+
+			it( "accepts a 32-character hex id in either case", () => {
+				expect( variables.apps.isValidAppId( "22222222222222222222222222222222" ) ).toBeTrue();
+				expect( variables.apps.isValidAppId( "0123456789abcdef0123456789ABCDEF" ) ).toBeTrue();
+			} );
+
+			/**
+			 * This guard is what stops a crafted id reaching a destination prefix or
+			 * an UNHEX(), so anything that is not exactly 32 hex chars must fail.
+			 */
+			it( "rejects anything that is not exactly 32 hex characters", () => {
+				var bad = [
+					"", "2222", "222222222222222222222222222222222", "2222222222222222222222222222222g",
+					"22222222-2222-2222-2222-222222222222", " 22222222222222222222222222222222",
+					"22222222222222222222222222222222 ", "22222222222222222222222222222222'--",
+					"../../etc/passwd"
+				];
+
+				for ( var candidate in bad ) {
+					expect( variables.apps.isValidAppId( candidate ) ).toBeFalse( "should reject [#candidate#]" );
+				}
+			} );
+
+			it( "rejects an id carrying a destination separator", () => {
+				expect( variables.apps.isValidAppId( "2222222222222222222222222222222." ) ).toBeFalse();
+			} );
+
+		} );
+
+		/**
+		 * The MySQL driver returns TINYINT(1) as a Boolean, and val( true ) is 0 —
+		 * which silently disabled every plan feature until this helper existed.
+		 */
+		describe( "flagEnabled()", () => {
+
+			it( "reads a driver-supplied boolean", () => {
+				expect( variables.apps.flagEnabled( true ) ).toBeTrue();
+				expect( variables.apps.flagEnabled( false ) ).toBeFalse();
+			} );
+
+			it( "reads a numeric flag", () => {
+				expect( variables.apps.flagEnabled( 1 ) ).toBeTrue();
+				expect( variables.apps.flagEnabled( 0 ) ).toBeFalse();
+			} );
+
+			it( "reads a string flag", () => {
+				expect( variables.apps.flagEnabled( "1" ) ).toBeTrue();
+				expect( variables.apps.flagEnabled( "0" ) ).toBeFalse();
+			} );
+
+			it( "defaults to false for missing or non-boolean values", () => {
+				expect( variables.apps.flagEnabled() ).toBeFalse();
+				expect( variables.apps.flagEnabled( "" ) ).toBeFalse();
+				expect( variables.apps.flagEnabled( "yes-ish" ) ).toBeFalse();
+			} );
+
+			it( "would have caught the val() regression", () => {
+				// val( true ) is 0; the helper must not agree with it.
+				expect( val( true ) ).toBe( 0 );
+				expect( variables.apps.flagEnabled( true ) ).toBeTrue();
+			} );
+
+		} );
+
+		describe( "getActiveAppByKey()", () => {
+
+			it( "returns the seeded dev app with its resolved plan", () => {
+				var found = variables.apps.getActiveAppByKey( "devkey123" );
+
+				expect( found ).notToBeEmpty();
+				expect( found.appId ).toBe( "22222222222222222222222222222222" );
+				expect( found.planName ).toBe( "Business" );
+				expect( variables.apps.flagEnabled( found.allowsMessageHistory ) ).toBeTrue();
+			} );
+
+			it( "returns empty for an unknown key", () => {
+				expect( variables.apps.getActiveAppByKey( "no-such-key" ) ).toBeEmpty();
+			} );
+
+		} );
+
+		describe( "getActiveAppById()", () => {
+
+			it( "returns empty for a malformed id rather than querying", () => {
+				expect( variables.apps.getActiveAppById( "not-hex" ) ).toBeEmpty();
+			} );
+
+			it( "returns empty for a well-formed but unknown id", () => {
+				expect( variables.apps.getActiveAppById( "99999999999999999999999999999999" ) ).toBeEmpty();
+			} );
+
+		} );
+
+	}
+
+}

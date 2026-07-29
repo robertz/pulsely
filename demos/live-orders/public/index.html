@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Live Orders — Pulsely demo</title>
+	<link rel="stylesheet" href="/vendor/base.css">
+	<link rel="stylesheet" href="/demo.css">
+</head>
+<body>
+
+<header class="demo-header">
+	<div class="wrap">
+		<span class="brand"><span class="brand-mark"></span>Pulsely</span>
+		<span class="demo-tag">Live Orders demo</span>
+		<span class="conn" id="conn" data-state="idle">
+			<i></i><span id="conn-label">connecting…</span>
+		</span>
+	</div>
+</header>
+
+<main class="wrap demo-main">
+
+	<section class="intro">
+		<h1>Open this page in two tabs.</h1>
+		<p>
+			Every order below arrived over a WebSocket. Publishing happens on the demo's
+			<em>server</em> — one signed HTTP call — and fans out to every tab at once.
+			Nothing here polls.
+		</p>
+	</section>
+
+	<div class="grid">
+
+		<!-- public channel -->
+		<section class="card">
+			<div class="card-head">
+				<h2>Public channel</h2>
+				<code id="public-name">orders</code>
+			</div>
+			<p class="card-note">
+				No auth endpoint, no token. Anyone with the public app key may subscribe.
+				On subscribe, recent messages replay first — reload and watch them return.
+			</p>
+			<div class="card-actions">
+				<button class="btn btn-primary" id="publish">Publish an order</button>
+				<button class="btn" id="burst">Publish 5</button>
+			</div>
+			<ul class="feed" id="feed" aria-live="polite"></ul>
+			<p class="empty" id="feed-empty">Waiting for the first event…</p>
+		</section>
+
+		<aside class="side">
+
+			<!-- private channel -->
+			<section class="card">
+				<div class="card-head">
+					<h2>Private channel</h2>
+					<code id="private-name">private-ops</code>
+					<span class="conn conn-sm" id="privConn" data-state="idle">
+						<i></i><span id="priv-conn-label">not connected</span>
+					</span>
+				</div>
+				<p class="card-note">
+					Subscribing here makes Pulsely call this demo's own auth endpoint first.
+					Join without a token and it refuses — that refusal is the feature. This
+					panel has its own connection, so a refusal here never touches the public
+					feed on the left.
+				</p>
+				<div class="field">
+					<label for="who">Identify as</label>
+					<input id="who" type="text" value="ops-1" maxlength="40" autocomplete="off">
+				</div>
+				<div class="card-actions">
+					<button class="btn btn-primary" id="join">Join with token</button>
+					<button class="btn" id="join-anon">Join anonymously</button>
+				</div>
+				<div class="card-actions">
+					<input id="note" type="text" placeholder="message to the room" maxlength="200" autocomplete="off">
+					<button class="btn" id="send-note" disabled>Send</button>
+				</div>
+				<ul class="feed feed-sm" id="ops-feed" aria-live="polite"></ul>
+			</section>
+
+			<!-- log -->
+			<section class="card">
+				<div class="card-head">
+					<h2>Event log</h2>
+					<button class="link" id="clear-log">clear</button>
+				</div>
+				<ul class="log" id="log" aria-live="polite"></ul>
+			</section>
+
+		</aside>
+	</div>
+</main>
+
+<script src="/vendor/stomp.umd.min.js"></script>
+<script src="/vendor/pulsely.js"></script>
+<script src="/demo.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<bx:script>
+	/**
+	 * Exercises the BoxLang SDK against the running broker. Driven by
+	 * tests/sdk-check.mjs, which parses the labelled lines below.
+	 */
+	bx:header name="Content-Type" value="text/plain";
+
+	APP_ID     = "22222222222222222222222222222222";
+	APP_KEY    = "devkey123";
+	APP_SECRET = "devsecret456";
+	LF         = char( 10 );
+
+	pulsely = new sdks.boxlang.Pulsely(
+		appId     = APP_ID,
+		appKey    = APP_KEY,
+		appSecret = APP_SECRET,
+		baseUrl   = "http://127.0.0.1:8085"
+	);
+
+	try {
+		result = pulsely.trigger( "sdk-boxlang", "created", { "id" : 42, "note" : "café ✓" } );
+		writeOutput( "publish: " & ( result.status ?: "?" ) & LF );
+	} catch ( any e ) {
+		writeOutput( "publish: FAILED " & e.message & LF );
+	}
+
+	writeOutput( "token: " & pulsely.authToken( "user-boxlang" ) & LF );
+
+	badSecret = new sdks.boxlang.Pulsely(
+		appId = APP_ID, appSecret = "wrong", baseUrl = "http://127.0.0.1:8085"
+	);
+	try {
+		badSecret.trigger( "sdk-boxlang", "created", {} );
+		writeOutput( "badsecret: NO ERROR" & LF );
+	} catch ( "PulselyError" e ) {
+		writeOutput( "badsecret: " & reReplace( e.message, "[^0-9]", "", "all" ) & LF );
+	}
+
+	// Signature parity against a fixed timestamp and payload, so the other SDKs
+	// can be compared byte for byte.
+	payload   = '{"channel":"parity","event":"check","data":{"n":1}}';
+	timestamp = "1700000000";
+	path      = "/apps/" & APP_ID & "/events";
+	signing   = "POST" & LF & path & LF & timestamp & LF & lcase( hash( payload, "SHA-256" ) );
+	writeOutput( "parity: " & lcase( hmac( signing, APP_SECRET, "HMACSHA256" ) ) & LF );
+</bx:script>

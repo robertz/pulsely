@@ -1,0 +1,14 @@
+/**
+ * Public marketing surface. Everything here is reachable without a session.
+ */
+class {
+
+	property name="planService" inject="PlanService";
+
+	function index( event, rc, prc ) {
+		prc.account = session.account ?: {};
+		prc.plans = planService.getPublicPlans();
+		event.setView( view = "home/index", layout = "Marketing" );
+	}
+
+}

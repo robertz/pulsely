@@ -1,0 +1,56 @@
+<div class="page-head">
+	<div>
+		<h1>Your apps</h1>
+		<p class="muted">Each app is an isolated pub/sub namespace with its own keys.</p>
+	</div>
+	<form method="post" action="/dashboard/createApp" class="inline-form">
+		<bx:output>#csrfField()#</bx:output>
+		<input name="name" placeholder="New app name" required>
+		<button class="btn btn-primary" type="submit">Create app</button>
+	</form>
+</div>
+
+<bx:if prc.apps.recordCount eq 0>
+	<div class="card empty">
+		<h2>Create your first app</h2>
+		<p class="muted">
+			An app is an isolated pub/sub namespace. Name one and you'll get an app key
+			for the browser and a secret for your server, straight away.
+		</p>
+		<form method="post" action="/dashboard/createApp" class="inline-form" style="justify-content:center;margin-top:18px">
+			<bx:output>#csrfField()#</bx:output>
+			<input name="name" placeholder="My first app" required>
+			<button class="btn btn-primary" type="submit">Create app</button>
+		</form>
+	</div>
+<bx:else>
+	<div class="grid">
+		<bx:output query="prc.apps">
+			<a class="card app-card" href="/dashboard/app/#encodeForHTMLAttribute( prc.apps.appId )#">
+				<div class="app-card-head">
+					<h2>#encodeForHTML( prc.apps.name )#</h2>
+					<bx:if prc.apps.is_active>
+						<span class="pill pill-ok">active</span>
+					<bx:else>
+						<span class="pill pill-off">paused</span>
+					</bx:if>
+				</div>
+				<code class="key">#encodeForHTML( prc.apps.app_key )#</code>
+				<div class="stat-row">
+					<div class="stat">
+						<span class="stat-value">#numberFormat( prc.apps.messagesToday )#</span>
+						<span class="stat-label">messages today</span>
+					</div>
+					<div class="stat">
+						<span class="stat-value">#numberFormat( prc.apps.peakToday )#</span>
+						<span class="stat-label">peak connections</span>
+					</div>
+					<div class="stat">
+						<span class="stat-value">#encodeForHTML( prc.apps.planName )#</span>
+						<span class="stat-label">plan</span>
+					</div>
+				</div>
+			</a>
+		</bx:output>
+	</div>
+</bx:if>

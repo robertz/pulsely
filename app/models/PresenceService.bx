@@ -1,0 +1,156 @@
+/**
+ * Who is currently in each presence channel.
+ *
+ * Membership is tracked per connection but reported per user: someone with three
+ * tabs open is one member, and only their first arrival and last departure produce
+ * a member_added / member_removed event. Without that, opening a second tab would
+ * announce a join that never happened.
+ *
+ * State lives in the application scope, matching the single-node assumption the
+ * rest of the broker is built on.
+ */
+class singleton {
+
+	variables.STORE_KEY = "pulselyPresence";
+
+	function init() {
+		ensureStore();
+		return this;
+	}
+
+	/**
+	 * Record a connection as present.
+	 *
+	 * @return { added : boolean, member : {...} } — `added` is true only when this
+	 *         is the user's first connection to the channel.
+	 */
+	struct function join(
+		required string destination,
+		required string connectionId,
+		required string userId,
+		struct userInfo = {}
+	) {
+		var store = ensureStore();
+
+		lock name="pulselyPresence-#hash( destination )#" type="exclusive" timeout="5" {
+			var members = store[ destination ] ?: {};
+			var alreadyPresent = hasUser( members, userId );
+
+			members[ connectionId ] = { "userId" : userId, "userInfo" : userInfo };
+			store[ destination ] = members;
+
+			return {
+				added  : !alreadyPresent,
+				member : { "user_id" : userId, "user_info" : userInfo }
+			};
+		}
+	}
+
+	/**
+	 * @return { removed : boolean, member : {...} } — `removed` is true only when
+	 *         the user's last connection to the channel has gone.
+	 */
+	struct function leave( required string destination, required string connectionId ) {
+		var store = ensureStore();
+
+		lock name="pulselyPresence-#hash( destination )#" type="exclusive" timeout="5" {
+			var members = store[ destination ] ?: {};
+
+			if ( !members.keyExists( connectionId ) ) {
+				return { removed : false, member : {} };
+			}
+
+			var departing = members[ connectionId ];
+			members.delete( connectionId );
+
+			if ( members.isEmpty() ) {
+				store.delete( destination );
+			} else {
+				store[ destination ] = members;
+			}
+
+			return {
+				removed : !hasUser( members, departing.userId ),
+				member  : { "user_id" : departing.userId, "user_info" : departing.userInfo }
+			};
+		}
+	}
+
+	/**
+	 * Drop a connection from every channel it was in — used when a socket closes
+	 * without unsubscribing.
+	 *
+	 * @return array of { destination, member, removed }
+	 */
+	array function leaveAll( required string connectionId ) {
+		var store = ensureStore();
+		var departures = [];
+
+		for ( var destination in store.keyArray() ) {
+			if ( ( store[ destination ] ?: {} ).keyExists( connectionId ) ) {
+				var result = leave( destination, connectionId );
+				if ( !result.member.isEmpty() ) {
+					departures.append( {
+						"destination" : destination,
+						"member"      : result.member,
+						"removed"     : result.removed
+					} );
+				}
+			}
+		}
+
+		return departures;
+	}
+
+	/**
+	 * Distinct users in the channel, in a shape the client can render directly.
+	 */
+	array function members( required string destination ) {
+		var members = ensureStore()[ destination ] ?: {};
+		var seen = {};
+		var list = [];
+
+		for ( var connectionId in members ) {
+			var entry = members[ connectionId ];
+			if ( !seen.keyExists( entry.userId ) ) {
+				seen[ entry.userId ] = true;
+				list.append( { "user_id" : entry.userId, "user_info" : entry.userInfo } );
+			}
+		}
+
+		return list;
+	}
+
+	numeric function memberCount( required string destination ) {
+		return members( destination ).len();
+	}
+
+	numeric function connectionCount( required string destination ) {
+		return ( ensureStore()[ destination ] ?: {} ).count();
+	}
+
+	function clearAll() {
+		application[ variables.STORE_KEY ] = {};
+	}
+
+	private boolean function hasUser( required struct members, required string userId ) {
+		for ( var connectionId in members ) {
+			if ( members[ connectionId ].userId == userId ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private struct function ensureStore() {
+		if ( !application.keyExists( variables.STORE_KEY ) ) {
+			lock name="pulselyPresenceInit" type="exclusive" timeout="10" {
+				if ( !application.keyExists( variables.STORE_KEY ) ) {
+					application[ variables.STORE_KEY ] = {};
+				}
+			}
+		}
+		return application[ variables.STORE_KEY ];
+	}
+
+}

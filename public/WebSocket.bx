@@ -1,0 +1,1013 @@
+/**
+ * Pulsely STOMP broker.
+ *
+ * Destinations are always `{appId}.{channelName}`, where appId is the lowercased
+ * hex of apps.id. Customers never see the prefix — the JS SDK adds it on the way
+ * in and strips it on the way out, and the trigger API adds it server-side.
+ *
+ * Tenant isolation is enforced in authorize(), not by exchange routing. A topic
+ * exchange would not help here: SocketBox topic exchanges are a publish-time
+ * routing table from a wildcard pattern to a fixed list of destinations, defined
+ * up front at exchange creation. They do not let a subscriber subscribe by
+ * wildcard, and they cannot know about apps created after boot. Since every
+ * destination therefore still needs an explicit `{appId}.` prefix check on
+ * SUBSCRIBE, the default direct exchange is sufficient and adds no indirection.
+ */
+class extends="modules.socketbox.models.WebSocketSTOMP" {
+
+	variables.PRIVATE_PREFIX    = "private-";
+	variables.PRESENCE_PREFIX   = "presence-";
+	// Reserved, alongside $ops (app/models/OpsService.bx) — who's currently
+	// signed in app-wide, independent of any one channel. Wired up in onSend()'s
+	// $signin handling and WatchlistService.
+	variables.WATCHLIST_CHANNEL = "$watchlist";
+	// Where a client SENDs its signin token and, once subscribed, receives
+	// signin.succeeded / signin.failed back. Open to any connection to read —
+	// sendToConnection() only ever targets the one connection that sent the
+	// token, so there is nothing to gate the way $ops/$watchlist are.
+	variables.SIGNIN_CHANNEL    = "$signin";
+
+	function configure() {
+		return {
+			"debugMode"   : false,
+			"heartBeatMS" : 10000
+		};
+	}
+
+	/* ------------------------------------------------------------ services */
+
+	private function appService() {
+		return getSingleton( "AppService", () => new app.models.AppService() );
+	}
+
+	private function channelAuthService() {
+		return getSingleton( "ChannelAuthService", () => new app.models.ChannelAuthService() );
+	}
+
+	private function meteringService() {
+		return getSingleton( "MeteringService", () => new app.models.MeteringService() );
+	}
+
+	private function historyService() {
+		return getSingleton( "HistoryService", () => new app.models.HistoryService() );
+	}
+
+	private function opsService() {
+		return getSingleton( "OpsService", () => new app.models.OpsService() );
+	}
+
+	private function presenceService() {
+		return getSingleton( "PresenceService", () => new app.models.PresenceService() );
+	}
+
+	private function watchlistService() {
+		return getSingleton( "WatchlistService", () => new app.models.WatchlistService() );
+	}
+
+	private function clientEventService() {
+		return getSingleton( "ClientEventService", () => new app.models.ClientEventService() );
+	}
+
+	private function webhookService() {
+		return getSingleton( "WebhookService", () => {
+			var service = new app.models.WebhookService();
+			// Instantiated directly rather than through WireBox — the listener runs
+			// outside the ColdBox lifecycle — so its one dependency is wired by hand.
+			service.signatureService = new app.models.SignatureService();
+			return service;
+		} );
+	}
+
+	/**
+	 * Queue an outbound webhook. Telemetry: never let it disturb the event that
+	 * produced it.
+	 */
+	private function fireWebhook( required string appId, required string eventType, required struct data ) {
+		try {
+			webhookService().enqueue( appId, eventType, data );
+		} catch ( any e ) {
+		}
+	}
+
+	/**
+	 * A channel is "occupied" when its first subscriber arrives and "vacated" when
+	 * its last one leaves — the pair customers use to start and stop upstream work.
+	 */
+	private function reportOccupancy( required string appId, required string destination, required string channelName ) {
+		var remaining = ( getSubscriptions()[ destination ] ?: {} ).count();
+
+		if ( remaining == 1 ) {
+			fireWebhook( appId, "channel_occupied", { "channel" : channelName } );
+		} else if ( remaining == 0 ) {
+			fireWebhook( appId, "channel_vacated", { "channel" : channelName } );
+		}
+	}
+
+	/**
+	 * Live subscriber count for a destination, broadcast to everyone currently
+	 * subscribed to it (including a subscriber that just joined — the whole
+	 * point is telling them the number they're now part of). Fires
+	 * unconditionally on every subscribe/unsubscribe/close, same as
+	 * connections.changed — no per-app opt-in for v1.
+	 */
+	private function broadcastSubscriptionCount( required string destination ) {
+		var subs = getSubscriptions()[ destination ] ?: {};
+		var payload = jsonSerialize( { "event" : "subscription_count", "data" : { "count" : subs.count() } } );
+
+		for ( var key in subs.keyArray() ) {
+			var subscription = subs[ key ] ?: {};
+			try {
+				// subscription/message-id headers set per recipient — see the note
+				// on sendToConnection(); without them a real client drops this.
+				var message = newMessage(
+					"MESSAGE",
+					{ "destination" : destination, "content-type" : "application/json" },
+					payload
+				);
+				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
+				message.setHeader( "message-id", createUUID() );
+				sendMessage( getMessageParser().serialize( message ), subscription.channel );
+			} catch ( any e ) {
+				// One dead subscriber must not stop the rest being told.
+			}
+		}
+	}
+
+	/**
+	 * A watchlist.online / watchlist.offline transition, to everyone currently
+	 * subscribed to this app's $watchlist — same header-per-recipient pattern as
+	 * broadcastSubscriptionCount(). No per-user filtering in v1: a subscriber
+	 * sees every signed-in user's transitions, not a chosen subset.
+	 */
+	private function broadcastWatchlist( required string appId, required string eventName, required string userId ) {
+		var destination = appId & "." & variables.WATCHLIST_CHANNEL;
+		var payload = jsonSerialize( { "event" : eventName, "data" : { "user_id" : userId } } );
+		var subs = getSubscriptions()[ destination ] ?: {};
+
+		for ( var key in subs.keyArray() ) {
+			var subscription = subs[ key ] ?: {};
+			try {
+				var message = newMessage(
+					"MESSAGE",
+					{ "destination" : destination, "content-type" : "application/json" },
+					payload
+				);
+				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
+				message.setHeader( "message-id", createUUID() );
+				sendMessage( getMessageParser().serialize( message ), subscription.channel );
+			} catch ( any e ) {
+				// One dead subscriber must not stop the rest being told.
+			}
+		}
+	}
+
+	private string function channelNameFrom( required string appId, required string destination ) {
+		return destination.startsWith( appId & "." )
+			? destination.mid( appId.len() + 2, destination.len() )
+			: destination;
+	}
+
+	/* ------------------------------------------------------ client publish */
+
+	/**
+	 * Whether an untrusted connection may publish to this destination.
+	 *
+	 * The app key is public, so anyone can open a socket. Publishing is therefore
+	 * confined to channels the subscriber had to be authorized onto in the first
+	 * place — a public channel would let any visitor broadcast to every other one.
+	 */
+	private boolean function authorizeClientPublish(
+		required string appId,
+		required string destination,
+		required any channel
+	) {
+		if ( !appService().isValidAppId( appId ) ) {
+			return false;
+		}
+
+		var prefix = appId & ".";
+		if ( !destination.startsWith( prefix ) ) {
+			return false;
+		}
+
+		var channelName = destination.mid( prefix.len() + 1, destination.len() );
+		if ( !channelName.len() ) {
+			return false;
+		}
+
+		// Reserved internal namespace is never client-writable.
+		if ( channelName.startsWith( "$" ) ) {
+			return false;
+		}
+
+		var tenantApp = appService().getActiveAppById( appId );
+		if ( tenantApp.isEmpty() ) {
+			return false;
+		}
+
+		if ( !appService().flagEnabled( tenantApp.allowsClientEvents ?: false ) ) {
+			throw(
+				type    = "STOMP-Authorization-failure",
+				message = "Client events are turned off for this app. Enable them in the dashboard, or publish from your server."
+			);
+		}
+
+		var isPrivate  = channelName.startsWith( variables.PRIVATE_PREFIX );
+		var isPresence = channelName.startsWith( variables.PRESENCE_PREFIX );
+
+		if ( !isPrivate && !isPresence ) {
+			throw(
+				type    = "STOMP-Authorization-failure",
+				message = "Clients may only publish to private- or presence- channels."
+			);
+		}
+
+		// The connection must already hold a subscription to this destination,
+		// which means it passed the auth endpoint. Without this, a client could
+		// publish into a private channel it was never allowed to read.
+		if ( !hasSubscription( destination, channel.hashCode() ) ) {
+			throw(
+				type    = "STOMP-Authorization-failure",
+				message = "Subscribe to [#channelName#] before publishing to it."
+			);
+		}
+
+		return true;
+	}
+
+	private boolean function hasSubscription( required string destination, required any connectionId ) {
+		var subs = getSubscriptions()[ destination ] ?: {};
+		for ( var key in subs.keyArray() ) {
+			if ( ( subs[ key ].channelID ?: "" ) == connectionId ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * A connection's own subscriptionID for a destination, needed to correctly
+	 * header a targeted reply via sendToConnection() — see handleSignin(), which
+	 * replies on $signin to the specific connection that sent a token, not a
+	 * broadcast to everyone subscribed. Empty string if not subscribed.
+	 */
+	private string function subscriptionIdFor( required string destination, required channel ) {
+		var subs = getSubscriptions()[ destination ] ?: {};
+		var connectionId = channel.hashCode();
+		for ( var key in subs.keyArray() ) {
+			if ( ( subs[ key ].channelID ?: "" ) == connectionId ) {
+				return subs[ key ].subscriptionID ?: "";
+			}
+		}
+		return "";
+	}
+
+	/* ------------------------------------------------------------ presence */
+
+	/**
+	 * Did the SUBSCRIBE actually take? A hard-boundary authorize() failure (bad
+	 * app id, cross-tenant destination) answers with an ERROR frame rather than
+	 * a return value, so the subscription registry is what tells us whether to
+	 * proceed with the rest of onSubscribe().
+	 */
+	private boolean function isSubscribed( required string destination, required channel, required string subscriptionID ) {
+		var subs = getSubscriptions()[ destination ] ?: {};
+		return subs.keyExists( channel.hashCode() & ":" & subscriptionID );
+	}
+
+	/**
+	 * Removes one subscription without touching the connection — the same
+	 * registry mutation the base onUnsubscribe() performs
+	 * (lib/modules/socketbox/models/WebSocketSTOMP.cfc:258-266), used here to
+	 * unwind a subscribe that got past the STOMP layer but failed the actual
+	 * channel-rule/webhook decision in authorizeChannelSubscription().
+	 */
+	private function revokeSubscription( required string destination, required channel, required string subscriptionID ) {
+		var subs = getSubscriptions();
+		if ( subs.keyExists( destination ) ) {
+			subs[ destination ].delete( channel.hashCode() & ":" & subscriptionID );
+		}
+	}
+
+	/**
+	 * Which presence destinations this subscription id covers, resolved before the
+	 * subscription is torn down.
+	 */
+	private array function destinationsFor( required channel, required string subscriptionID ) {
+		var key = channel.hashCode() & ":" & subscriptionID;
+		var found = [];
+
+		for ( var destination in getSubscriptions().keyArray() ) {
+			if ( ( getSubscriptions()[ destination ] ?: {} ).keyExists( key ) ) {
+				found.append( destination );
+			}
+		}
+
+		return found;
+	}
+
+	private function enterPresence( required string destination, required channel, required string subscriptionID, required struct identity ) {
+		var result = presenceService().join(
+			destination,
+			channel.hashCode(),
+			identity.userId,
+			identity.userInfo
+		);
+
+		// The arriving subscriber gets the roster; everyone else gets the arrival.
+		sendToConnection( destination, channel, subscriptionID, "presence.subscription_succeeded", {
+			"members"  : presenceService().members( destination ),
+			"me"       : result.member,
+			"count"    : presenceService().memberCount( destination )
+		} );
+
+		if ( result.added ) {
+			broadcastPresence( destination, "presence.member_added", result.member, channel );
+			fireWebhook( appId( destination ), "member_added", {
+				"channel" : channelNameFrom( appId( destination ), destination ),
+				"member"  : result.member
+			} );
+		}
+	}
+
+	private function exitPresence( required string destination, required channel ) {
+		var result = presenceService().leave( destination, channel.hashCode() );
+
+		if ( result.removed ) {
+			broadcastPresence( destination, "presence.member_removed", result.member, channel );
+			fireWebhook( appId( destination ), "member_removed", {
+				"channel" : channelNameFrom( appId( destination ), destination ),
+				"member"  : result.member
+			} );
+		}
+	}
+
+	/** The app id is the destination's first segment. */
+	private string function appId( required string destination ) {
+		return destination.listFirst( "." );
+	}
+
+	/**
+	 * Presence events go to every subscriber of the destination except the one that
+	 * caused them — a client does not need telling that it joined or left.
+	 */
+	private function broadcastPresence(
+		required string destination,
+		required string eventName,
+		required struct member,
+		required any exceptChannel
+	) {
+		var payload = jsonSerialize( {
+			"event" : eventName,
+			"data"  : {
+				"member" : member,
+				"count"  : presenceService().memberCount( destination )
+			}
+		} );
+
+		var exceptId = isNull( exceptChannel ) ? "" : exceptChannel.hashCode();
+		var subs = getSubscriptions()[ destination ] ?: {};
+
+		for ( var key in subs.keyArray() ) {
+			var subscription = subs[ key ] ?: {};
+			if ( ( subscription.channelID ?: "" ) == exceptId ) {
+				continue;
+			}
+			try {
+				// subscription/message-id headers set per recipient — see the note
+				// on sendToConnection(); without them a real client drops this.
+				var message = newMessage(
+					"MESSAGE",
+					{ "destination" : destination, "content-type" : "application/json" },
+					payload
+				);
+				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
+				message.setHeader( "message-id", createUUID() );
+				sendMessage( getMessageParser().serialize( message ), subscription.channel );
+			} catch ( any e ) {
+				// A subscriber that has already gone must not stop the others being told.
+			}
+		}
+	}
+
+	/**
+	 * A hand-built MESSAGE frame, for the cases (presence acks, subscription
+	 * lifecycle) that target one specific connection rather than going through
+	 * the base send()/routeMessage() fan-out. STOMP.js only routes an inbound
+	 * MESSAGE to a bound callback when it carries `subscription` and
+	 * `message-id` headers matching an active subscription — the base
+	 * routeInternal() in the socketbox module sets both per recipient
+	 * (lib/modules/socketbox/models/STOMP/exchange/BaseExchange.cfc); anything
+	 * built by hand has to set them the same way or a real client silently
+	 * drops it to onUnhandledMessage.
+	 */
+	private function sendToConnection(
+		required string destination,
+		required channel,
+		required string subscriptionID,
+		required string eventName,
+		required struct data
+	) {
+		var message = newMessage(
+			"MESSAGE",
+			{ "destination" : destination, "content-type" : "application/json" },
+			jsonSerialize( { "event" : eventName, "data" : data } )
+		);
+		message.setHeader( "subscription", subscriptionID );
+		message.setHeader( "message-id", createUUID() );
+		sendMessage( getMessageParser().serialize( message ), channel );
+	}
+
+	/**
+	 * Push a live connection count to the dashboard. Ops events are not metered —
+	 * they are our own traffic, not the customer's.
+	 */
+	private function publishConnectionCount( required string appId ) {
+		try {
+			send(
+				opsService().opsDestination( appId ),
+				jsonSerialize( opsService().envelope( "connections.changed", {
+					"current" : meteringService().getCurrentConnections( appId )
+				} ) ),
+				{ "content-type" : "application/json" }
+			);
+		} catch ( any e ) {
+			// The ops feed is telemetry; never let it break a real connection.
+		}
+	}
+
+	/**
+	 * The listener is recreated per message, so services are cached in the
+	 * application scope rather than in variables. WireBox is not reachable here —
+	 * this class is booted by the WebSocket server, not the ColdBox lifecycle.
+	 */
+	private function getSingleton( required string name, required function producer ) {
+		var storeKey = "pulselyServices";
+		if ( !application.keyExists( storeKey ) ) {
+			lock name="pulselyServiceStore" type="exclusive" timeout="10" {
+				if ( !application.keyExists( storeKey ) ) {
+					application[ storeKey ] = {};
+				}
+			}
+		}
+		var store = application[ storeKey ];
+		if ( !store.keyExists( name ) ) {
+			lock name="pulselyService-#name#" type="exclusive" timeout="10" {
+				if ( !store.keyExists( name ) ) {
+					store[ name ] = producer();
+				}
+			}
+		}
+		return store[ name ];
+	}
+
+	/* ------------------------------------------------------------- authn */
+
+	/**
+	 * `login` is the public app_key. `passcode` is optional: a browser cannot hold
+	 * app_secret, so an empty passcode yields an anonymous connection that can only
+	 * reach public channels. A populated passcode is a short-lived token minted by
+	 * the customer's backend, and carries the user identity that private/presence
+	 * authorization is decided against.
+	 */
+	boolean function authenticate(
+		required string login,
+		required string passcode,
+		string host,
+		required channel,
+		required Struct connectionMetadata
+	) {
+		var tenantApp = appService().getActiveAppByKey( login.trim() );
+
+		if ( tenantApp.isEmpty() ) {
+			throw( type = "STOMP-Authentication-failure", message = "Unknown or inactive app key." );
+		}
+
+		var connectionLimit = val( tenantApp.connectionLimit ?: 0 );
+		if ( connectionLimit > 0 && meteringService().getCurrentConnections( tenantApp.appId ) >= connectionLimit ) {
+			throw(
+				type    = "STOMP-Authentication-failure",
+				message = "Connection limit reached for plan [#tenantApp.planName ?: 'none'#]."
+			);
+		}
+
+		connectionMetadata[ "appId" ]  = tenantApp.appId;
+		connectionMetadata[ "userId" ] = "";
+
+		if ( passcode.trim().len() ) {
+			var identity = verifyUserToken( passcode.trim(), tenantApp );
+			if ( !identity.valid ) {
+				throw( type = "STOMP-Authentication-failure", message = "Invalid or expired auth token." );
+			}
+			connectionMetadata[ "userId" ] = identity.userId;
+		}
+
+		meteringService().connectionOpened( tenantApp.appId );
+		publishConnectionCount( tenantApp.appId );
+		return true;
+	}
+
+	/**
+	 * Token format: `{expiresEpochSeconds}.{userId}.{hmacHex}`, signed with the
+	 * app secret. The customer's backend mints these; the secret never leaves it.
+	 */
+	private struct function verifyUserToken( required string token, required struct tenantApp ) {
+		var parts = token.listToArray( "." );
+		if ( parts.len() != 3 ) {
+			return { valid : false, userId : "" };
+		}
+
+		var expires = val( parts[ 1 ] );
+		var userId  = parts[ 2 ];
+		var sig     = parts[ 3 ];
+
+		// Epoch milliseconds in UTC; see the note in SignatureService.verify().
+		if ( expires <= int( getTickCount() / 1000 ) ) {
+			return { valid : false, userId : "" };
+		}
+
+		var expected = lcase( hmac(
+			"#tenantApp.appKey#:#expires#:#userId#",
+			tenantApp.appSecret,
+			"HMACSHA256"
+		) );
+
+		return {
+			valid  : constantTimeEquals( expected, lcase( sig ) ),
+			userId : userId
+		};
+	}
+
+	private boolean function constantTimeEquals( required string a, required string b ) {
+		if ( a.len() != b.len() ) {
+			return false;
+		}
+		var diff = 0;
+		for ( var i = 1; i <= a.len(); i++ ) {
+			diff = bitOr( diff, bitXor( ascii( a.mid( i, 1 ) ), ascii( b.mid( i, 1 ) ) ) );
+		}
+		return diff == 0;
+	}
+
+	/* ------------------------------------------------------------- authz */
+
+	/**
+	 * Enforces only the hard, connection-fatal boundaries — an invalid app id, a
+	 * cross-tenant destination, or an ops-identity mismatch are not "you may not
+	 * have this channel", they're "this connection should not exist" — and the
+	 * base onSubscribe() reacts to a `false` return by sending an ERROR frame and
+	 * closing the socket (lib/modules/socketbox/models/WebSocketSTOMP.cfc:646),
+	 * which is the right outcome for those.
+	 *
+	 * A private-/presence- channel refusal is a different kind of failure — the
+	 * connection itself is perfectly legitimate, only this one channel is off
+	 * limits — so that decision is deliberately NOT made here. It happens in
+	 * onSubscribe(), after the base class has already accepted the subscribe,
+	 * where a refusal can be reported without the connection paying for it. See
+	 * authorizeChannelSubscription().
+	 */
+	boolean function authorize(
+		required string login,
+		required string exchange,
+		required string destination,
+		required string access,
+		required channel,
+		required Struct connectionMetadata
+	) {
+		var appId = connectionMetadata.appId ?: "";
+
+		// Client publishing. The trigger API calls send() server-side and bypasses
+		// this hook entirely, so everything here is an untrusted browser.
+		if ( access != "read" ) {
+			return authorizeClientPublish( appId, destination, channel );
+		}
+
+		if ( !appService().isValidAppId( appId ) ) {
+			return false;
+		}
+
+		var prefix = appId & ".";
+		if ( !destination.startsWith( prefix ) ) {
+			return false;
+		}
+
+		var channelName = destination.mid( prefix.len() + 1, destination.len() );
+		if ( !channelName.len() ) {
+			return false;
+		}
+
+		// The dashboard's ops feed and the app-wide watchlist feed. Only a
+		// connection holding a backend-minted token naming the ops user gets
+		// them, so an ordinary end-user token for this app cannot read the
+		// account's usage counters or who else is online.
+		if ( channelName == opsService().opsChannel() || channelName == variables.WATCHLIST_CHANNEL ) {
+			return ( connectionMetadata.userId ?: "" ) == opsService().opsUser();
+		}
+
+		// $signin falls through to here — any connection may subscribe to it to
+		// receive its own signin result, see the note on variables.SIGNIN_CHANNEL.
+		return true;
+	}
+
+	/**
+	 * The actual private-/presence- channel decision: plan gating, rule lookup,
+	 * webhook call. Moved out of authorize() so a refusal here is a
+	 * subscription_error, not a connection-fatal ERROR frame — see the comment
+	 * on authorize(). Public channels (and non-$-prefixed names generally)
+	 * always pass; there is nothing to check without a rule.
+	 *
+	 * @return { authorized, isPresence, presenceIdentity, reason }
+	 */
+	private struct function authorizeChannelSubscription(
+		required string appId,
+		required string channelName,
+		required channel,
+		required struct connectionMetadata
+	) {
+		var isPrivate  = channelName.startsWith( variables.PRIVATE_PREFIX );
+		var isPresence = channelName.startsWith( variables.PRESENCE_PREFIX );
+
+		var denied = { "authorized" : false, "isPresence" : isPresence, "presenceIdentity" : {}, "reason" : "" };
+		var allowed = { "authorized" : true, "isPresence" : false, "presenceIdentity" : {}, "reason" : "" };
+
+		if ( !isPrivate && !isPresence ) {
+			return allowed;
+		}
+
+		// The plan gates the channel type before any rule is consulted. Without this
+		// an app on a plan that excludes private channels still got them merely by
+		// having a rule configured, which is not what the pricing page sells.
+		var tenantApp = appService().getActiveAppById( appId );
+		if ( tenantApp.isEmpty() ) {
+			denied.reason = "Unknown or inactive app.";
+			return denied;
+		}
+
+		if ( isPrivate && !appService().flagEnabled( tenantApp.allowsPrivateChannels ?: false ) ) {
+			denied.reason = "Private channels are not available on the [#tenantApp.planName ?: 'current'#] plan.";
+			return denied;
+		}
+
+		if ( isPresence && !appService().flagEnabled( tenantApp.allowsPresenceChannels ?: false ) ) {
+			denied.reason = "Presence channels are not available on the [#tenantApp.planName ?: 'current'#] plan.";
+			return denied;
+		}
+
+		var rule = channelAuthService().findMatchingRule( appId, channelName );
+		if ( rule.isEmpty() ) {
+			denied.reason = "No authorization rule configured for channel [#channelName#].";
+			return denied;
+		}
+
+		if ( !rule.authWebhookUrl.len() ) {
+			denied.reason = "Channel [#channelName#] has no auth endpoint configured.";
+			return denied;
+		}
+
+		var decision = channelAuthService().requestAuthorization(
+			rule.authWebhookUrl,
+			channelName,
+			channel.hashCode(),
+			connectionMetadata.userId ?: ""
+		);
+
+		if ( !decision.authorized ) {
+			denied.reason = "Not authorized to subscribe to [#channelName#].";
+			return denied;
+		}
+
+		var presenceIdentity = {};
+		if ( isPresence ) {
+			presenceIdentity = {
+				// The endpoint owns the identity; fall back to the connection's own
+				// token identity so a customer answering plain yes/no still works.
+				"userId"   : decision.userId.len() ? decision.userId : ( connectionMetadata.userId ?: "" ),
+				"userInfo" : decision.userInfo
+			};
+		}
+
+		return { "authorized" : true, "isPresence" : isPresence, "presenceIdentity" : presenceIdentity, "reason" : "" };
+	}
+
+	/* --------------------------------------------------- lifecycle hooks */
+
+	/**
+	 * super.onSubscribe() always accepts a syntactically valid, same-tenant
+	 * subscribe now (see authorize()'s comment) — this is where the actual
+	 * private-/presence- channel decision happens, followed by presence entry,
+	 * occupancy reporting, and history replay for whatever was actually allowed.
+	 */
+	function onSubscribe( required message, required channel ) {
+		super.onSubscribe( message, channel );
+
+		var destination = message.getHeader( "destination", "" );
+		var connectionMetadata = getSTOMPConnections()[ channel.hashCode() ].connectionMetadata ?: {};
+		var appId = connectionMetadata.appId ?: "";
+
+		if ( !appService().isValidAppId( appId ) || !destination.startsWith( appId & "." ) ) {
+			return;
+		}
+
+		var subscriptionID = message.getHeader( "id", "" );
+
+		// Nothing to decide if the base class didn't actually register it (should
+		// not happen given authorize() above, but this is the same registry check
+		// isSubscribed() has always used to confirm a subscribe really took).
+		if ( !isSubscribed( destination, channel, subscriptionID ) ) {
+			return;
+		}
+
+		var channelName = channelNameFrom( appId, destination );
+		var decision = authorizeChannelSubscription( appId, channelName, channel, connectionMetadata );
+
+		if ( !decision.authorized ) {
+			revokeSubscription( destination, channel, subscriptionID );
+			sendToConnection( destination, channel, subscriptionID, "subscription_error", { "reason" : decision.reason } );
+			return;
+		}
+
+		if ( decision.isPresence ) {
+			// Sends its own richer presence.subscription_succeeded (roster + who
+			// you are) — a second, generic ack right after would be redundant.
+			enterPresence( destination, channel, subscriptionID, decision.presenceIdentity );
+		} else {
+			sendToConnection( destination, channel, subscriptionID, "subscription_succeeded", {} );
+		}
+
+		reportOccupancy( appId, destination, channelName );
+		broadcastSubscriptionCount( destination );
+
+		var tenantApp = appService().getActiveAppById( appId );
+		if ( tenantApp.isEmpty() || !appService().flagEnabled( tenantApp.allowsMessageHistory ?: false ) ) {
+			return;
+		}
+
+		var backlog = historyService().getRecent(
+			appId,
+			channelName,
+			val( tenantApp.historyRetentionHours ?: 0 )
+		);
+
+		// subscription/message-id headers set explicitly — see the note on
+		// sendToConnection(); without them a real client drops every replayed
+		// message to onUnhandledMessage instead of the subscribe callback.
+		for ( var past in backlog ) {
+			var replayMessage = newMessage(
+				"MESSAGE",
+				{ "destination" : destination, "content-type" : "application/json" },
+				jsonSerialize( past )
+			);
+			replayMessage.setHeader( "subscription", subscriptionID );
+			replayMessage.setHeader( "message-id", createUUID() );
+			sendMessage( getMessageParser().serialize( replayMessage ), channel );
+		}
+	}
+
+	/**
+	 * A client SEND to the reserved $signin destination, carrying a token in the
+	 * same {expires}.{userId}.{hmac} shape the CONNECT-time passcode already
+	 * uses (see verifyUserToken()) — signing in later, decoupled from the
+	 * connection's original identity, reuses the exact same minting and
+	 * verification, just sent over a different frame instead of presented at
+	 * CONNECT. The reply goes only to the connection that sent it, via its own
+	 * $signin subscription (see subscriptionIdFor()) — a client must subscribe
+	 * to $signin before calling signin() to see the result.
+	 */
+	private function handleSignin(
+		required message,
+		required channel,
+		required string appId,
+		required struct connectionMetadata
+	) {
+		var destination = message.getHeader( "destination", "" );
+		var subscriptionID = subscriptionIdFor( destination, channel );
+
+		var tenantApp = appService().getActiveAppById( appId );
+		if ( tenantApp.isEmpty() ) {
+			sendToConnection( destination, channel, subscriptionID, "signin.failed", { "reason" : "Unknown or inactive app." } );
+			return;
+		}
+
+		var body = message.getBodyRaw();
+		var token = "";
+		if ( isSimpleValue( body ) && isJSON( body ) ) {
+			var parsed = jsonDeserialize( body );
+			token = isStruct( parsed ) ? ( parsed.token ?: "" ) : "";
+		}
+
+		var identity = verifyUserToken( token, tenantApp );
+		if ( !identity.valid ) {
+			sendToConnection( destination, channel, subscriptionID, "signin.failed", { "reason" : "Invalid or expired token." } );
+			return;
+		}
+
+		// From here on this connection is signed in — the same identity
+		// private-/presence- channel auth already sees via user_token.
+		connectionMetadata.userId = identity.userId;
+
+		var result = watchlistService().signIn( appId, identity.userId, channel.hashCode() );
+		if ( result.wasFirstConnection ) {
+			broadcastWatchlist( appId, "watchlist.online", identity.userId );
+		}
+
+		sendToConnection( destination, channel, subscriptionID, "signin.succeeded", { "user_id" : identity.userId } );
+	}
+
+	/**
+	 * A client publishing to a channel.
+	 *
+	 * authorize() has already decided the connection may write here; this decides
+	 * whether *this particular event* is acceptable, and delivers it. It does not
+	 * call super.onSend(), because the base implementation routes to every
+	 * subscriber including the sender.
+	 */
+	function onSend( required message, required channel ) {
+		var destination = message.getHeader( "destination", "" );
+		var receiptID = message.getHeader( "receipt", "" );
+		var connectionMetadata = getSTOMPConnections()[ channel.hashCode() ].connectionMetadata ?: {};
+		var appId = connectionMetadata.appId ?: "";
+		var login = getSTOMPConnections()[ channel.hashCode() ].login ?: "";
+
+		// A control message, not a channel publish — handled entirely on its own
+		// before the client-publish authorization path below, which would refuse
+		// it anyway (authorizeClientPublish() rejects every $-prefixed name).
+		if ( appService().isValidAppId( appId ) && channelNameFrom( appId, destination ) == variables.SIGNIN_CHANNEL ) {
+			handleSignin( message, channel, appId, connectionMetadata );
+			return;
+		}
+
+		try {
+			if ( !authorize( login, "", destination, "write", channel, connectionMetadata ) ) {
+				sendError( "Authorization failure", "Not authorized to publish to [#destination#].", channel, receiptID );
+				return;
+			}
+		} catch ( "STOMP-Authorization-failure" e ) {
+			sendError( "Authorization failure", e.message, channel, receiptID );
+			return;
+		}
+
+		// getBody() deserializes when the content-type is JSON — and throws on
+		// malformed input. The raw string is what we want to validate and measure.
+		var body = message.getBodyRaw();
+		if ( !isSimpleValue( body ) || !isJSON( body ) ) {
+			sendError( "Invalid payload", "Client events must be a JSON object.", channel, receiptID );
+			return;
+		}
+
+		if ( !clientEventService().isWithinSizeLimit( body ) ) {
+			sendError(
+				"Payload too large",
+				"Client events are limited to #clientEventService().maxPayloadBytes()# bytes.",
+				channel, receiptID
+			);
+			return;
+		}
+
+		var envelope = jsonDeserialize( body );
+		var eventName = trim( envelope.event ?: "" );
+
+		// Without the prefix a client could emit `order.paid` and be believed by
+		// handlers that were only ever meant to trust your server.
+		if ( !clientEventService().isClientEventName( eventName ) ) {
+			sendError(
+				"Invalid event name",
+				"Client event names must start with [#clientEventService().eventPrefix()#].",
+				channel, receiptID
+			);
+			return;
+		}
+
+		if ( !clientEventService().consume( channel.hashCode() ) ) {
+			sendError(
+				"Rate limit exceeded",
+				"Client events are limited to #clientEventService().maxEventsPerSecond()# per second.",
+				channel, receiptID
+			);
+			return;
+		}
+
+		var channelName = destination.mid( appId.len() + 2, destination.len() );
+		var outgoing = jsonSerialize( {
+			"event"  : eventName,
+			"data"   : envelope.data ?: {},
+			"client" : true
+		} );
+
+		// Delivered to everyone else on the channel; the sender already has it.
+		fanOutExcept( destination, outgoing, channel );
+
+		// Metered like any other message, but deliberately NOT written to history:
+		// client events are ephemeral chatter (typing, cursors), and persisting
+		// them would let any browser write rows into the customer's history table
+		// for as long as it stays connected.
+		meteringService().recordMessages( appId, 1 );
+
+		fireWebhook( appId, "client_event", {
+			"channel" : channelName,
+			"event"   : eventName,
+			"data"    : envelope.data ?: {}
+		} );
+
+		sendReceipt( message, channel );
+	}
+
+	private function fanOutExcept( required string destination, required string payload, required any exceptChannel ) {
+		var exceptId = exceptChannel.hashCode();
+		var subs = getSubscriptions()[ destination ] ?: {};
+
+		for ( var key in subs.keyArray() ) {
+			var subscription = subs[ key ] ?: {};
+			if ( ( subscription.channelID ?: "" ) == exceptId ) {
+				continue;
+			}
+			try {
+				// subscription/message-id headers set per recipient — see the note
+				// on sendToConnection(); without them a real client drops this.
+				var message = newMessage(
+					"MESSAGE",
+					{ "destination" : destination, "content-type" : "application/json" },
+					payload
+				);
+				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
+				message.setHeader( "message-id", createUUID() );
+				sendMessage( getMessageParser().serialize( message ), subscription.channel );
+			} catch ( any e ) {
+				// One dead subscriber must not stop the rest being delivered to.
+			}
+		}
+	}
+
+	/**
+	 * Leaving a presence channel explicitly. The subscription must still exist when
+	 * we look it up, so the departure is worked out before super removes it.
+	 */
+	function onUnsubscribe( required message, required channel ) {
+		var subscriptionID = message.getHeader( "id", "" );
+		var leaving = destinationsFor( channel, subscriptionID );
+
+		super.onUnsubscribe( message, channel );
+
+		for ( var destination in leaving ) {
+			exitPresence( destination, channel );
+			reportOccupancy( appId( destination ), destination, channelNameFrom( appId( destination ), destination ) );
+			broadcastSubscriptionCount( destination );
+		}
+	}
+
+	/**
+	 * Covers both an explicit DISCONNECT and an abrupt socket drop, so the
+	 * in-memory connection count cannot leak upward over time.
+	 */
+	function onClose( required channel ) {
+		// A dropped socket never unsubscribes, so anyone watching would otherwise
+		// see the member linger forever.
+		clientEventService().release( channel.hashCode() );
+
+		// Captured before super removes them, so vacancy can be reported after.
+		var heldDestinations = [];
+		for ( var destination in getSubscriptions().keyArray() ) {
+			if ( hasSubscription( destination, channel.hashCode() ) ) {
+				heldDestinations.append( destination );
+			}
+		}
+
+		for ( var departure in presenceService().leaveAll( channel.hashCode() ) ) {
+			if ( departure.removed ) {
+				broadcastPresence( departure.destination, "presence.member_removed", departure.member, channel );
+			}
+		}
+
+		var connection = getSTOMPConnections()[ channel.hashCode() ] ?: {};
+		var appId = connection.connectionMetadata.appId ?: "";
+
+		if ( appService().isValidAppId( appId ) ) {
+			meteringService().connectionClosed( appId );
+
+			// A dropped socket never signs out either — same reasoning as the
+			// presence cleanup above, just app-wide instead of per-channel.
+			for ( var departure in watchlistService().signOutAllForConnection( appId, channel.hashCode() ) ) {
+				if ( departure.wasLastConnection ) {
+					broadcastWatchlist( appId, "watchlist.offline", departure.userId );
+				}
+			}
+		}
+
+		super.onClose( channel );
+
+		if ( appService().isValidAppId( appId ) ) {
+			publishConnectionCount( appId );
+		}
+
+		// Not appId( destination ) — that's a different thing with the same name,
+		// the private helper that derives an app id from a destination string.
+		// This function already resolved the connection's actual app id into the
+		// local `appId` above, which shadows the helper for the rest of this
+		// scope; every subscription in heldDestinations belongs to this same
+		// connection, so it's the same value regardless.
+		for ( var destination in heldDestinations ) {
+			reportOccupancy( appId, destination, channelNameFrom( appId, destination ) );
+			broadcastSubscriptionCount( destination );
+		}
+	}
+
+}

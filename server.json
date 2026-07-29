@@ -1,0 +1,32 @@
+{
+    "name":"pulsely",
+    "app":{
+        "cfengine":"boxlang@1",
+        "engineConfigFile":"./runtime/boxlang.json"
+    },
+    "jvm":{
+        "heapSize":"512",
+        "javaVersion":"openjdk21_jdk"
+    },
+    "web":{
+        "webroot":"public",
+        "websocket":{
+            "enable":true,
+            "listener":"WebSocket.bx"
+        },
+        "bindings":{
+            "HTTP":{
+                "listen":"8085"
+            }
+        },
+        "rewrites":{
+            "enable":true
+        },
+        "aliases":{
+            "/coldbox/system/exceptions":"./lib/coldbox/system/exceptions/",
+            "/tests":"./tests/",
+            "/sdks":"./sdks/"
+        }
+    },
+    "openbrowser":false
+}

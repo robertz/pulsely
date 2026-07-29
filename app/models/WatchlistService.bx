@@ -1,0 +1,112 @@
+/**
+ * Who is currently signed in, per app — independent of any one channel.
+ *
+ * Unlike presence (scoped to a channel a connection chose to join), watchlist
+ * identity comes from signin() on the reserved `$signin` destination and is
+ * tracked app-wide: a user is "online" if any of their connections have signed
+ * in, regardless of what channels those connections subscribe to.
+ *
+ * State lives in the application scope, matching the single-node assumption the
+ * rest of the broker is built on (see PresenceService, which this mirrors).
+ */
+class singleton {
+
+	variables.STORE_KEY = "pulselyWatchlist";
+
+	function init() {
+		ensureStore();
+		return this;
+	}
+
+	/**
+	 * Record a connection as signed in as this user, for this app.
+	 *
+	 * @return { wasFirstConnection : boolean } — true only when this is the
+	 *         user's first signed-in connection to this app.
+	 */
+	struct function signIn( required string appId, required string userId, required string connectionId ) {
+		var store = ensureStore();
+
+		lock name="pulselyWatchlist-#appId#-#hash( userId )#" type="exclusive" timeout="5" {
+			var users = store[ appId ] ?: {};
+			var connections = users[ userId ] ?: {};
+			var wasFirst = connections.isEmpty();
+
+			connections[ connectionId ] = true;
+			users[ userId ] = connections;
+			store[ appId ] = users;
+
+			return { wasFirstConnection : wasFirst };
+		}
+	}
+
+	/**
+	 * @return { wasLastConnection : boolean } — true only when the user's last
+	 *         signed-in connection to this app has gone.
+	 */
+	struct function signOut( required string appId, required string userId, required string connectionId ) {
+		var store = ensureStore();
+
+		lock name="pulselyWatchlist-#appId#-#hash( userId )#" type="exclusive" timeout="5" {
+			var users = store[ appId ] ?: {};
+			var connections = users[ userId ] ?: {};
+
+			if ( !connections.keyExists( connectionId ) ) {
+				return { wasLastConnection : false };
+			}
+
+			connections.delete( connectionId );
+
+			if ( connections.isEmpty() ) {
+				users.delete( userId );
+			} else {
+				users[ userId ] = connections;
+			}
+			store[ appId ] = users;
+
+			return { wasLastConnection : connections.isEmpty() };
+		}
+	}
+
+	/**
+	 * Drop a connection from every user it signed in as, for this app — used
+	 * when a socket closes without an explicit sign-out.
+	 *
+	 * @return array of { userId, wasLastConnection }
+	 */
+	array function signOutAllForConnection( required string appId, required string connectionId ) {
+		var store = ensureStore();
+		var users = store[ appId ] ?: {};
+		var departures = [];
+
+		for ( var userId in users.keyArray() ) {
+			if ( ( users[ userId ] ?: {} ).keyExists( connectionId ) ) {
+				var result = signOut( appId, userId, connectionId );
+				departures.append( { "userId" : userId, "wasLastConnection" : result.wasLastConnection } );
+			}
+		}
+
+		return departures;
+	}
+
+	boolean function isOnline( required string appId, required string userId ) {
+		var users = ensureStore()[ appId ] ?: {};
+		return !( users[ userId ] ?: {} ).isEmpty();
+	}
+
+	function clearAll() {
+		application[ variables.STORE_KEY ] = {};
+	}
+
+	private struct function ensureStore() {
+		if ( !application.keyExists( variables.STORE_KEY ) ) {
+			lock name="pulselyWatchlistInit" type="exclusive" timeout="10" {
+				if ( !application.keyExists( variables.STORE_KEY ) ) {
+					application[ variables.STORE_KEY ] = {};
+				}
+			}
+		}
+		return application[ variables.STORE_KEY ];
+	}
+
+}

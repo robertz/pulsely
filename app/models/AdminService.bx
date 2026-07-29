@@ -1,0 +1,260 @@
+/**
+ * System administration: managing every account, not just your own.
+ *
+ * Two rules run through this whole class:
+ *
+ *   1. Nothing here is reachable without a fresh is_admin check — the caller
+ *      passes the acting account id and it is re-read from the database, never
+ *      trusted from the session. Revoking admin therefore takes effect at once
+ *      rather than when the session happens to expire.
+ *   2. An administrator cannot suspend or demote themselves. Losing the last way
+ *      into the console is not a recoverable mistake through the UI.
+ */
+class singleton {
+
+	variables.DSN = "pulsely";
+
+	function init() {
+		return this;
+	}
+
+	/**
+	 * Authoritative admin check, read fresh every time.
+	 */
+	boolean function isAdmin( required string accountId ) {
+		if ( !reFind( "^[0-9a-fA-F]{32}$", accountId ) ) {
+			return false;
+		}
+
+		var result = queryExecute(
+			"SELECT is_admin FROM accounts WHERE id = UNHEX(:accountId) AND is_active = 1",
+			{ accountId : { value : accountId, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+
+		return result.recordCount && isBoolean( result.is_admin[ 1 ] ) && result.is_admin[ 1 ];
+	}
+
+	/* ---------------------------------------------------------- reporting */
+
+	array function listAccounts() {
+		var rows = queryExecute(
+			"SELECT  LOWER(HEX(a.id)) AS accountId, a.email, a.name, a.is_admin, a.is_active,
+			         a.created_at,
+			         COALESCE(p.name, '(none)')  AS planName,
+			         COALESCE(p.price_cents, 0)  AS planPrice,
+			         COUNT(DISTINCT ap.id)       AS appCount,
+			         COALESCE(SUM(u.messages_sent), 0) AS messagesToday
+			 FROM    accounts a
+			 LEFT JOIN plans p  ON p.id = a.plan_id
+			 LEFT JOIN apps ap  ON ap.account_id = a.id
+			 LEFT JOIN usage_daily u ON u.app_id = ap.id AND u.usage_date = CURRENT_DATE()
+			 GROUP BY a.id, a.email, a.name, a.is_admin, a.is_active, a.created_at, p.name, p.price_cents
+			 ORDER BY a.created_at ASC",
+			{},
+			{ datasource : variables.DSN }
+		);
+
+		return rows.reduce( ( acc, row ) => {
+			acc.append( {
+				"accountId"     : row.accountId,
+				"email"         : row.email,
+				"name"          : row.name,
+				"isAdmin"       : isBoolean( row.is_admin ) && row.is_admin,
+				"isActive"      : isBoolean( row.is_active ) && row.is_active,
+				"planName"      : row.planName,
+				"planPrice"     : row.planPrice,
+				"appCount"      : row.appCount,
+				"messagesToday" : row.messagesToday,
+				"createdAt"     : dateFormat( row.created_at, "yyyy-mm-dd" )
+			} );
+			return acc;
+		}, [] );
+	}
+
+	array function listApps( required string accountId ) {
+		var rows = queryExecute(
+			"SELECT  LOWER(HEX(ap.id)) AS appId, ap.name, ap.app_key, ap.is_active,
+			         COALESCE(ep.name, '(none)') AS effectivePlan,
+			         COALESCE(u.messages_sent, 0) AS messagesToday
+			 FROM    apps ap
+			 JOIN    accounts acc ON acc.id = ap.account_id
+			 LEFT JOIN plans ep ON ep.id = COALESCE(ap.plan_id, acc.plan_id)
+			 LEFT JOIN usage_daily u ON u.app_id = ap.id AND u.usage_date = CURRENT_DATE()
+			 WHERE   ap.account_id = UNHEX(:accountId)
+			 ORDER BY ap.created_at ASC",
+			{ accountId : { value : accountId, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+
+		return rows.reduce( ( acc, row ) => {
+			acc.append( {
+				"appId"         : row.appId,
+				"name"          : row.name,
+				"appKey"        : row.app_key,
+				"isActive"      : isBoolean( row.is_active ) && row.is_active,
+				"effectivePlan" : row.effectivePlan,
+				"messagesToday" : row.messagesToday
+			} );
+			return acc;
+		}, [] );
+	}
+
+	/**
+	 * Every app on the installation, across every account — the cross-tenant view
+	 * a single account's dashboard never shows. Live connection counts are not
+	 * joined in here since they live in the broker's in-memory metering store,
+	 * not the database; callers merge those in separately.
+	 */
+	array function listAllApps() {
+		var rows = queryExecute(
+			"SELECT  LOWER(HEX(ap.id)) AS appId, ap.name, ap.app_key, ap.is_active, ap.cluster,
+			         LOWER(HEX(acc.id)) AS accountId, acc.email AS ownerEmail,
+			         COALESCE(ep.name, '(none)')          AS planName,
+			         COALESCE(ep.connection_limit, 0)     AS connectionLimit,
+			         COALESCE(u.messages_sent, 0)         AS messagesToday,
+			         COALESCE(u.peak_connections, 0)      AS peakToday
+			 FROM    apps ap
+			 JOIN    accounts acc ON acc.id = ap.account_id
+			 LEFT JOIN plans ep ON ep.id = COALESCE(ap.plan_id, acc.plan_id)
+			 LEFT JOIN usage_daily u ON u.app_id = ap.id AND u.usage_date = CURRENT_DATE()
+			 ORDER BY ap.created_at ASC",
+			{},
+			{ datasource : variables.DSN }
+		);
+
+		return rows.reduce( ( acc, row ) => {
+			acc.append( {
+				"appId"           : row.appId,
+				"name"            : row.name,
+				"appKey"          : row.app_key,
+				"isActive"        : isBoolean( row.is_active ) && row.is_active,
+				"cluster"         : row.cluster,
+				"accountId"       : row.accountId,
+				"ownerEmail"      : row.ownerEmail,
+				"planName"        : row.planName,
+				"connectionLimit" : row.connectionLimit,
+				"messagesToday"   : row.messagesToday,
+				"peakToday"       : row.peakToday
+			} );
+			return acc;
+		}, [] );
+	}
+
+	/**
+	 * Coarse platform totals for the monitor's header tiles.
+	 */
+	struct function platformTotals() {
+		var result = queryExecute(
+			"SELECT COUNT(DISTINCT acc.id) AS accountCount,
+			        COUNT(DISTINCT ap.id)  AS appCount,
+			        COALESCE(SUM(u.messages_sent), 0) AS messagesToday
+			 FROM   accounts acc
+			 LEFT JOIN apps ap ON ap.account_id = acc.id
+			 LEFT JOIN usage_daily u ON u.app_id = ap.id AND u.usage_date = CURRENT_DATE()",
+			{},
+			{ datasource : variables.DSN }
+		);
+
+		return {
+			"accountCount"  : result.accountCount[ 1 ],
+			"appCount"      : result.appCount[ 1 ],
+			"messagesToday" : result.messagesToday[ 1 ]
+		};
+	}
+
+	array function listPlans() {
+		var rows = queryExecute(
+			"SELECT LOWER(HEX(id)) AS planId, name, price_cents
+			 FROM   plans WHERE is_active = 1 ORDER BY price_cents ASC",
+			{},
+			{ datasource : variables.DSN }
+		);
+
+		return rows.reduce( ( acc, row ) => {
+			acc.append( { "planId" : row.planId, "name" : row.name, "priceCents" : row.price_cents } );
+			return acc;
+		}, [] );
+	}
+
+	/* ------------------------------------------------------------ actions */
+
+	/**
+	 * @return { ok : boolean, error : string }
+	 */
+	struct function setPlan( required string actingAccountId, required string accountId, required string planId ) {
+		if ( !isAdmin( actingAccountId ) ) {
+			return { ok : false, error : "Not permitted." };
+		}
+		if ( !reFind( "^[0-9a-fA-F]{32}$", accountId ) || !reFind( "^[0-9a-fA-F]{32}$", planId ) ) {
+			return { ok : false, error : "Unknown account or plan." };
+		}
+
+		queryExecute(
+			"UPDATE accounts SET plan_id = UNHEX(:planId)
+			 WHERE id = UNHEX(:accountId)
+			   AND EXISTS ( SELECT 1 FROM plans WHERE id = UNHEX(:planId) AND is_active = 1 )",
+			{
+				planId    : { value : planId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return { ok : true, error : "" };
+	}
+
+	struct function setActive( required string actingAccountId, required string accountId, required boolean active ) {
+		if ( !isAdmin( actingAccountId ) ) {
+			return { ok : false, error : "Not permitted." };
+		}
+		if ( actingAccountId == accountId ) {
+			return { ok : false, error : "You cannot suspend your own account." };
+		}
+
+		queryExecute(
+			"UPDATE accounts SET is_active = :active WHERE id = UNHEX(:accountId)",
+			{
+				active    : { value : active ? 1 : 0, type : "tinyint" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return { ok : true, error : "" };
+	}
+
+	struct function setAdmin( required string actingAccountId, required string accountId, required boolean admin ) {
+		if ( !isAdmin( actingAccountId ) ) {
+			return { ok : false, error : "Not permitted." };
+		}
+		if ( actingAccountId == accountId && !admin ) {
+			return { ok : false, error : "You cannot remove your own administrator access." };
+		}
+
+		// Never leave the system with nobody able to reach the console.
+		if ( !admin && adminCount() <= 1 ) {
+			return { ok : false, error : "There must be at least one administrator." };
+		}
+
+		queryExecute(
+			"UPDATE accounts SET is_admin = :admin WHERE id = UNHEX(:accountId)",
+			{
+				admin     : { value : admin ? 1 : 0, type : "tinyint" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return { ok : true, error : "" };
+	}
+
+	numeric function adminCount() {
+		return queryExecute(
+			"SELECT COUNT(*) AS c FROM accounts WHERE is_admin = 1 AND is_active = 1",
+			{},
+			{ datasource : variables.DSN }
+		).c[ 1 ];
+	}
+
+}

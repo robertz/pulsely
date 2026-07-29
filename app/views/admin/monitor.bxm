@@ -1,0 +1,88 @@
+<bx:output>
+<div class="page-head">
+	<div>
+		<a class="back" href="/admin">&larr; Accounts</a>
+		<h1>Apps &amp; connections</h1>
+		<p class="muted">Every app on this installation, across every account.</p>
+	</div>
+</div>
+
+<div class="live-banner" id="monitorStatus" data-state="live">
+	<span class="dot"></span><span class="live-text">Refreshing every 4s</span>
+</div>
+
+<section class="tiles">
+	<div class="card tile">
+		<span class="stat-label">Accounts</span>
+		<span class="tile-value" id="tileAccounts">#numberFormat( prc.totals.accountCount )#</span>
+	</div>
+	<div class="card tile">
+		<span class="stat-label">Apps</span>
+		<span class="tile-value" id="tileApps">#numberFormat( prc.totals.appCount )#</span>
+	</div>
+	<div class="card tile">
+		<span class="stat-label">Live connections</span>
+		<span class="tile-value" id="tileConnections">#numberFormat( prc.totals.liveConnections )#</span>
+	</div>
+	<div class="card tile">
+		<span class="stat-label">Messages today</span>
+		<span class="tile-value" id="tileMessages">#numberFormat( prc.totals.messagesToday )#</span>
+	</div>
+</section>
+
+<section class="card">
+	<h2>Apps</h2>
+
+	<bx:if arrayLen( prc.apps ) eq 0>
+		<p class="muted">No apps on this installation yet.</p>
+	<bx:else>
+		<table class="table" id="appsTable">
+			<thead>
+				<tr>
+					<th>App</th><th>Owner</th><th>Plan</th>
+					<th>Live connections</th><th>Peak today</th><th>Messages today</th>
+					<th>Status</th>
+				</tr>
+			</thead>
+			<tbody>
+				<bx:loop array="#prc.apps#" index="app">
+					<tr data-app-id="#encodeForHTMLAttribute( app.appId )#">
+						<td>
+							#encodeForHTML( app.name )#
+							<div class="muted small"><code>#encodeForHTML( app.appKey )#</code></div>
+						</td>
+						<td>
+							<a href="/admin/account/#encodeForHTMLAttribute( app.accountId )#">#encodeForHTML( app.ownerEmail )#</a>
+						</td>
+						<td>#encodeForHTML( app.planName )#</td>
+						<td>
+							<span class="tile-value-sm" data-field="liveConnections">#numberFormat( app.liveConnections )#</span>
+							<bx:if app.connectionLimit gt 0>
+								<span class="muted small"> / #numberFormat( app.connectionLimit )#</span>
+							</bx:if>
+						</td>
+						<td data-field="peakToday">#numberFormat( app.peakToday )#</td>
+						<td data-field="messagesToday">#numberFormat( app.messagesToday )#</td>
+						<td data-field="status">
+							<bx:if app.isActive>
+								<span class="pill pill-ok">active</span>
+							<bx:else>
+								<span class="pill pill-off">paused</span>
+							</bx:if>
+						</td>
+					</tr>
+				</bx:loop>
+			</tbody>
+		</table>
+		<p class="muted small">
+			Live connections come from each broker node's own in-memory counters and
+			reset on restart; messages and peaks are read from today's usage totals.
+		</p>
+	</bx:if>
+</section>
+
+<div id="monitorConfig" data-endpoint="/admin/monitorData" data-interval-ms="4000"></div>
+</bx:output>
+
+<script src="/assets/js/admin-monitor.js"></script>
+

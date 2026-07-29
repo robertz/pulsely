@@ -1,0 +1,129 @@
+/* Live Orders demo. Rides on the Pulsely design tokens in vendor/base.css. */
+
+.wrap { width: 100%; max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+
+.demo-header {
+	position: sticky; top: 0; z-index: 20;
+	background: rgba(8, 9, 13, .86);
+	backdrop-filter: saturate(160%) blur(12px);
+	border-bottom: 1px solid var(--border-soft);
+}
+.demo-header .wrap { display: flex; align-items: center; gap: 14px; height: 60px; }
+
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 680; font-size: 17px; letter-spacing: -0.02em; }
+.brand-mark {
+	width: 22px; height: 22px; border-radius: 6px;
+	background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+	box-shadow: 0 0 16px -2px var(--accent-glow);
+}
+.demo-tag {
+	font-size: 11px; font-weight: 640; letter-spacing: .08em; text-transform: uppercase;
+	color: var(--accent); background: rgba(52, 229, 139, .12);
+	padding: 3px 9px; border-radius: 999px;
+}
+
+/* Connection state is the one thing a realtime demo must never hide. */
+.conn {
+	margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+	font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+}
+.conn i { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.conn[data-state="live"] i { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.conn[data-state="live"] { color: var(--accent); }
+.conn[data-state="down"] i { background: var(--danger); }
+.conn[data-state="down"] { color: var(--danger); }
+
+.demo-main { padding: 42px 24px 80px; }
+
+.intro { max-width: 62ch; margin-bottom: 34px; }
+.intro h1 { font-size: clamp(1.7rem, 3.4vw, 2.3rem); margin-bottom: 12px; }
+.intro p { color: var(--text-muted); margin: 0; }
+.intro em { color: var(--text); font-style: normal; font-weight: 600; }
+
+.grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; align-items: start; }
+.side { display: grid; gap: 18px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: 20px;
+}
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.conn-sm { font-size: 11px; }
+.conn-sm i { width: 6px; height: 6px; }
+.card-head h2 { font-size: 1.05rem; }
+.card-head code {
+	font-size: 12px; color: var(--accent);
+	background: rgba(52, 229, 139, .1);
+	padding: 2px 8px; border-radius: 999px;
+}
+.card-note { color: var(--text-dim); font-size: 13.5px; margin: 0 0 16px; }
+
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+
+.btn {
+	font: inherit; font-size: 14px; font-weight: 560;
+	padding: 9px 16px; border-radius: var(--radius-sm);
+	background: var(--surface-2); color: var(--text);
+	border: 1px solid var(--border); cursor: pointer;
+	transition: border-color .15s ease, background .15s ease;
+}
+.btn:hover:not(:disabled) { border-color: var(--surface-3); background: var(--surface-3); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 640; }
+.btn-primary:hover:not(:disabled) { background: #4bef9c; border-color: transparent; }
+
+.link {
+	margin-left: auto; background: none; border: 0; cursor: pointer;
+	color: var(--text-dim); font: inherit; font-size: 12px; text-decoration: underline;
+}
+
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+input[type="text"] {
+	font: inherit; font-size: 14px; flex: 1; min-width: 0;
+	padding: 9px 12px; border-radius: var(--radius-sm);
+	background: var(--surface); color: var(--text);
+	border: 1px solid var(--border);
+}
+input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
+/* ------------------------------------------------------------------- feeds */
+
+.feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 460px; overflow-y: auto; }
+.feed-sm { max-height: 190px; }
+
+.feed li {
+	display: flex; align-items: baseline; gap: 12px;
+	padding: 11px 13px;
+	background: var(--surface);
+	border: 1px solid var(--border-soft);
+	border-radius: var(--radius-sm);
+	font-size: 14px;
+	animation: pop .35s ease;
+}
+/* Replayed history is dimmed so "caught up" and "just happened" stay legible. */
+.feed li.is-replay { opacity: .62; border-style: dashed; }
+.feed li .id { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+.feed li .item { font-weight: 560; }
+.feed li .meta { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+.feed li .total { color: var(--accent); font-family: var(--font-mono); font-size: 13px; }
+
+@keyframes pop {
+	from { opacity: 0; transform: translateY(-6px); }
+	to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.feed li { animation: none; }
+}
+
+.empty { color: var(--text-dim); font-size: 13.5px; font-style: italic; margin: 10px 0 0; }
+
+.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; max-height: 260px; overflow-y: auto; }
+.log li { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+.log li .t { color: var(--text-dim); }
+.log li.ok   { color: var(--accent); }
+.log li.err  { color: var(--danger); }
+.log li.info { color: var(--info); }

@@ -1,0 +1,70 @@
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll() {
+		variables.auth = new app.models.ChannelAuthService();
+	}
+
+	function run() {
+
+		describe( "patternMatches()", () => {
+
+			it( "matches an exact pattern", () => {
+				expect( variables.auth.patternMatches( "private-orders", "private-orders" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-orders", "private-order" ) ).toBeFalse();
+			} );
+
+			it( "treats * as a glob over any characters", () => {
+				expect( variables.auth.patternMatches( "private-order-*", "private-order-42" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-order-*", "private-order-" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-*", "private-anything-at-all" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-order-*", "private-invoice-42" ) ).toBeFalse();
+			} );
+
+			it( "anchors at both ends so a pattern cannot match a substring", () => {
+				expect( variables.auth.patternMatches( "private-order", "xxprivate-orderxx" ) ).toBeFalse();
+				expect( variables.auth.patternMatches( "order", "private-order" ) ).toBeFalse();
+			} );
+
+			/**
+			 * Without escaping, a dot in a pattern would be a regex wildcard and
+			 * 'private-a.b' would authorize 'private-axb' — a different channel.
+			 */
+			it( "treats regex metacharacters as literals", () => {
+				expect( variables.auth.patternMatches( "private-a.b", "private-a.b" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-a.b", "private-axb" ) ).toBeFalse();
+
+				expect( variables.auth.patternMatches( "private-a+b", "private-a+b" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-a+b", "private-aab" ) ).toBeFalse();
+
+				expect( variables.auth.patternMatches( "private-(x)", "private-(x)" ) ).toBeTrue();
+				expect( variables.auth.patternMatches( "private-[abc]", "private-a" ) ).toBeFalse();
+			} );
+
+			it( "matches case-insensitively", () => {
+				expect( variables.auth.patternMatches( "private-Order-*", "private-order-1" ) ).toBeTrue();
+			} );
+
+			it( "does not let a pattern escape into another app's channel space", () => {
+				expect( variables.auth.patternMatches( "private-*", "presence-orders" ) ).toBeFalse();
+			} );
+
+		} );
+
+		describe( "callAuthWebhook()", () => {
+
+			it( "denies when the endpoint is unreachable", () => {
+				// Port 1 has nothing listening; a transport failure must deny, not allow.
+				expect( variables.auth.callAuthWebhook(
+					"http://127.0.0.1:1/auth", "private-x", "sock-1", ""
+				) ).toBeFalse();
+			} );
+
+			it( "denies when the url is malformed", () => {
+				expect( variables.auth.callAuthWebhook( "not-a-url", "private-x", "sock-1", "" ) ).toBeFalse();
+			} );
+
+		} );
+
+	}
+
+}

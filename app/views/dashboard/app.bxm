@@ -1,0 +1,271 @@
+<bx:output>
+<div class="page-head">
+	<div>
+		<a class="back" href="/dashboard">&larr; All apps</a>
+		<h1>#encodeForHTML( prc.app.name )#</h1>
+		<p class="muted">
+			Plan <strong>#encodeForHTML( prc.app.planName )#</strong>
+			&middot; #numberFormat( prc.app.messageDailyLimit )# messages/day
+			&middot; #numberFormat( prc.app.connectionLimit )# connections
+		</p>
+	</div>
+	<form method="post" action="/dashboard/toggleApp" class="inline-form">
+		#csrfField()#
+		<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
+		<input type="hidden" name="active" value="#prc.app.is_active ? 1 : 0#">
+		<button class="btn #prc.app.is_active ? 'btn-ghost' : 'btn-primary'#" type="submit">
+			#prc.app.is_active ? 'Pause app' : 'Activate app'#
+		</button>
+	</form>
+</div>
+
+<div class="live-banner" id="liveStatus" data-state="connecting">
+	<span class="dot"></span><span class="live-text">Connecting to live feed&hellip;</span>
+</div>
+
+<section class="tiles">
+	<div class="card tile">
+		<span class="stat-label">Messages today</span>
+		<span class="tile-value" id="tileMessages">#numberFormat( prc.app.messagesToday )#</span>
+	</div>
+	<div class="card tile">
+		<span class="stat-label">Live connections</span>
+		<span class="tile-value" id="tileConnections">&mdash;</span>
+	</div>
+	<div class="card tile">
+		<span class="stat-label">Peak connections today</span>
+		<span class="tile-value">#numberFormat( prc.app.peakToday )#</span>
+	</div>
+	<div class="card tile">
+		<span class="stat-label">History</span>
+		<span class="tile-value">
+			<bx:if prc.app.allowsMessageHistory>#prc.app.historyRetentionHours#h<bx:else>off</bx:if>
+		</span>
+	</div>
+</section>
+
+<section class="card">
+	<h2>Credentials</h2>
+	<div class="cred">
+		<label>App ID</label>
+		<code>#encodeForHTML( prc.app.appId )#</code>
+	</div>
+	<div class="cred">
+		<label>App key</label>
+		<code>#encodeForHTML( prc.app.app_key )#</code>
+		<span class="muted small">public &mdash; safe to embed in your frontend</span>
+	</div>
+	<div class="cred">
+		<label>App secret</label>
+		<code class="secret" id="appSecret" data-secret="#encodeForHTMLAttribute( prc.app.app_secret )#">••••••••••••••••</code>
+		<button class="btn btn-ghost btn-sm" type="button" id="revealSecret">Reveal</button>
+		<span class="muted small">server-side only &mdash; signs your trigger API calls</span>
+	</div>
+</section>
+
+<section class="card">
+	<h2>Usage &mdash; last 14 days</h2>
+	<bx:set maxMessages = 1>
+	<bx:loop array="#prc.usageSeries#" index="point">
+		<bx:set maxMessages = max( maxMessages, point.messages )>
+	</bx:loop>
+	<div class="chart">
+		<bx:loop array="#prc.usageSeries#" index="point">
+			<div class="bar-col" title="#encodeForHTMLAttribute( point.date )#: #numberFormat( point.messages )# messages">
+				<div class="bar" style="height: #max( 2, int( point.messages / maxMessages * 100 ) )#%"></div>
+				<span class="bar-label">#right( point.date, 2 )#</span>
+			</div>
+		</bx:loop>
+	</div>
+	<p class="muted small">Peak #numberFormat( maxMessages )# messages in a day.</p>
+</section>
+
+<section class="card">
+	<h2>Live activity</h2>
+	<ul class="feed" id="feed">
+		<bx:if arrayLen( prc.recentMessages ) eq 0>
+			<li class="feed-empty" id="feedEmpty">Nothing yet. Publish an event and it will appear here instantly.</li>
+		<bx:else>
+			<bx:loop array="#prc.recentMessages#" index="msg">
+				<li class="feed-item">
+					<span class="feed-time">#encodeForHTML( msg.createdAt )#</span>
+					<span class="feed-chan">#encodeForHTML( msg.channel )#</span>
+					<span class="feed-event">#encodeForHTML( msg.event )#</span>
+				</li>
+			</bx:loop>
+		</bx:if>
+	</ul>
+</section>
+
+<section class="card">
+	<h2>Private &amp; presence channel rules</h2>
+	<p class="muted small">
+		Channels prefixed <code>private-</code> or <code>presence-</code> are only subscribable
+		when a rule matches and your auth endpoint approves the subscriber.
+	</p>
+
+	<bx:if arrayLen( prc.authRules ) eq 0>
+		<p class="muted">No rules yet.</p>
+	<bx:else>
+		<table class="table">
+			<thead>
+				<tr><th>Pattern</th><th>Type</th><th>Auth endpoint</th><th></th></tr>
+			</thead>
+			<tbody>
+				<bx:loop array="#prc.authRules#" index="rule">
+					<tr>
+						<td><code>#encodeForHTML( rule.channelPattern )#</code></td>
+						<td><span class="pill">#encodeForHTML( rule.ruleType )#</span></td>
+						<td class="url">
+							<bx:if len( rule.authWebhookUrl )>
+								#encodeForHTML( rule.authWebhookUrl )#
+							<bx:else>
+								<span class="muted">none &mdash; subscriptions denied</span>
+							</bx:if>
+						</td>
+						<td>
+							<form method="post" action="/dashboard/deleteRule">
+								#csrfField()#
+								<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
+								<input type="hidden" name="ruleId" value="#encodeForHTMLAttribute( rule.ruleId )#">
+								<button class="btn btn-ghost btn-sm" type="submit">Remove</button>
+							</form>
+						</td>
+					</tr>
+				</bx:loop>
+			</tbody>
+		</table>
+	</bx:if>
+
+	<div class="client-events">
+		<div>
+			<strong>Client events</strong>
+			<bx:if prc.app.allowsClientEvents>
+				<span class="pill pill-ok">on</span>
+			<bx:else>
+				<span class="pill pill-off">off</span>
+			</bx:if>
+			<p class="muted small">
+				Lets browsers publish straight to each other on the channels above, without a
+				round trip through your server. Events must be named <code>client-*</code>, are
+				capped at 10 per second per connection, and the payload is untrusted &mdash;
+				validate it like any other user input.
+			</p>
+		</div>
+		<form method="post" action="/dashboard/toggleClientEvents" class="inline-form">
+			#csrfField()#
+			<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
+			<input type="hidden" name="enabled" value="#prc.app.allowsClientEvents ? 1 : 0#">
+			<button class="btn #prc.app.allowsClientEvents ? 'btn-ghost' : 'btn-primary'#" type="submit">
+				#prc.app.allowsClientEvents ? 'Turn off' : 'Turn on'#
+			</button>
+		</form>
+	</div>
+
+	<form method="post" action="/dashboard/addRule" class="rule-form">
+
+		#csrfField()#
+		<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
+		<input name="channelPattern" placeholder="private-order-*" required>
+		<select name="ruleType">
+			<option value="private">private</option>
+			<option value="presence">presence</option>
+		</select>
+		<input name="authWebhookUrl" placeholder="https://your-app.example.com/pusher/auth" type="url">
+		<button class="btn btn-primary" type="submit">Add rule</button>
+	</form>
+</section>
+
+
+<section class="card">
+	<h2>Event webhooks</h2>
+	<p class="muted small">
+		We POST to your endpoint when things happen in this app &mdash; so your backend can
+		react without holding a socket open. Each request is signed with your app secret
+		using the same scheme as the trigger API, so the server SDK verifies it for you.
+		Delivery is queued and retried with backoff; a slow endpoint never stalls the broker.
+	</p>
+
+	<bx:if arrayLen( prc.webhooks ) eq 0>
+		<p class="muted">No endpoints yet.</p>
+	<bx:else>
+		<table class="table">
+			<thead>
+				<tr><th>Endpoint</th><th>Events</th><th></th></tr>
+			</thead>
+			<tbody>
+				<bx:loop array="#prc.webhooks#" index="hook">
+					<tr>
+						<td class="url">#encodeForHTML( hook.url )#</td>
+						<td>
+							<bx:loop array="#hook.events#" index="eventName">
+								<span class="pill">#encodeForHTML( eventName )#</span>
+							</bx:loop>
+						</td>
+						<td>
+							<form method="post" action="/dashboard/deleteWebhook">
+								#csrfField()#
+								<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
+								<input type="hidden" name="webhookId" value="#encodeForHTMLAttribute( hook.webhookId )#">
+								<button class="btn btn-ghost btn-sm" type="submit">Remove</button>
+							</form>
+						</td>
+					</tr>
+				</bx:loop>
+			</tbody>
+		</table>
+	</bx:if>
+
+	<form method="post" action="/dashboard/addWebhook" class="rule-form">
+		#csrfField()#
+		<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
+		<input name="url" type="url" placeholder="https://your-app.example.com/pulsely/webhook" required
+			style="flex:1 1 280px">
+		<button class="btn btn-primary" type="submit">Add endpoint</button>
+		<div class="webhook-events">
+			<bx:loop array="#prc.webhookEvents#" index="eventName">
+				<label class="webhook-event">
+					<input type="checkbox" name="events" value="#encodeForHTMLAttribute( eventName )#" checked>
+					#encodeForHTML( eventName )#
+				</label>
+			</bx:loop>
+		</div>
+	</form>
+
+	<bx:if arrayLen( prc.webhookDeliveries ) gt 0>
+		<h2 style="margin-top:22px">Recent deliveries</h2>
+		<table class="table">
+			<thead>
+				<tr><th>Time</th><th>Event</th><th>Attempts</th><th>Status</th></tr>
+			</thead>
+			<tbody>
+				<bx:loop array="#prc.webhookDeliveries#" index="delivery">
+					<tr>
+						<td>#encodeForHTML( delivery.createdAt )#</td>
+						<td>#encodeForHTML( delivery.eventType )#</td>
+						<td>#delivery.attempts#</td>
+						<td>
+							<bx:if delivery.delivered>
+								<span class="pill pill-ok">#delivery.lastStatus#</span>
+							<bx:elseif delivery.attempts gte 5>
+								<span class="pill pill-off">gave up</span>
+							<bx:else>
+								<span class="pill">retrying</span>
+							</bx:if>
+						</td>
+					</tr>
+				</bx:loop>
+			</tbody>
+		</table>
+	</bx:if>
+</section>
+
+<div id="opsConfig"
+	data-app-key="#encodeForHTMLAttribute( prc.app.app_key )#"
+	data-ops-token="#encodeForHTMLAttribute( prc.opsToken )#"
+	data-ops-channel="#encodeForHTMLAttribute( prc.opsChannel )#"></div>
+</bx:output>
+
+<script src="/assets/js/vendor/stomp.umd.min.js"></script>
+<script src="/assets/js/pulsely.js"></script>
+<script src="/assets/js/ops-dashboard.js"></script>

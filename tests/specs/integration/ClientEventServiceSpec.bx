@@ -1,0 +1,129 @@
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll() {
+		variables.clientEvents = new app.models.ClientEventService();
+	}
+
+	private function reset() {
+		variables.clientEvents.clearAll();
+	}
+
+	function run() {
+
+		/**
+		 * Without the prefix a client could emit `order.paid` and be believed by
+		 * handlers that were only ever meant to trust the customer's server.
+		 */
+		describe( "event naming", () => {
+
+			it( "accepts client- prefixed names", () => {
+				expect( variables.clientEvents.isClientEventName( "client-typing" ) ).toBeTrue();
+				expect( variables.clientEvents.isClientEventName( "client-" ) ).toBeTrue();
+			} );
+
+			it( "refuses anything that could be mistaken for a server event", () => {
+				for ( var name in [ "order.paid", "created", "", "Client-typing", " client-typing", "notclient-typing" ] ) {
+					expect( variables.clientEvents.isClientEventName( name ) )
+						.toBeFalse( "should refuse [#name#]" );
+				}
+			} );
+
+		} );
+
+		describe( "payload size", () => {
+
+			it( "accepts a payload within the cap", () => {
+				expect( variables.clientEvents.isWithinSizeLimit( repeatString( "x", 100 ) ) ).toBeTrue();
+			} );
+
+			it( "accepts a payload exactly at the cap", () => {
+				expect( variables.clientEvents.isWithinSizeLimit(
+					repeatString( "x", variables.clientEvents.maxPayloadBytes() )
+				) ).toBeTrue();
+			} );
+
+			it( "refuses a payload over the cap", () => {
+				expect( variables.clientEvents.isWithinSizeLimit(
+					repeatString( "x", variables.clientEvents.maxPayloadBytes() + 1 )
+				) ).toBeFalse();
+			} );
+
+		} );
+
+		describe( "rate limiting", () => {
+
+			beforeEach( () => reset() );
+
+			it( "allows up to the per-second budget", () => {
+				for ( var i = 1; i <= variables.clientEvents.maxEventsPerSecond(); i++ ) {
+					expect( variables.clientEvents.consume( "conn-1" ) )
+						.toBeTrue( "event #i# should be within budget" );
+				}
+			} );
+
+			it( "refuses once the budget is spent", () => {
+				for ( var i = 1; i <= variables.clientEvents.maxEventsPerSecond(); i++ ) {
+					variables.clientEvents.consume( "conn-1" );
+				}
+
+				expect( variables.clientEvents.consume( "conn-1" ) ).toBeFalse();
+				expect( variables.clientEvents.consume( "conn-1" ) ).toBeFalse();
+			} );
+
+			it( "budgets each connection separately", () => {
+				for ( var i = 1; i <= variables.clientEvents.maxEventsPerSecond(); i++ ) {
+					variables.clientEvents.consume( "conn-1" );
+				}
+
+				expect( variables.clientEvents.consume( "conn-1" ) ).toBeFalse();
+				expect( variables.clientEvents.consume( "conn-2" ) )
+					.toBeTrue( "one noisy connection must not throttle everyone else" );
+			} );
+
+			it( "refills on the next second", () => {
+				for ( var i = 1; i <= variables.clientEvents.maxEventsPerSecond(); i++ ) {
+					variables.clientEvents.consume( "conn-1" );
+				}
+				expect( variables.clientEvents.consume( "conn-1" ) ).toBeFalse();
+
+				sleep( 1100 );
+
+				expect( variables.clientEvents.consume( "conn-1" ) ).toBeTrue();
+			} );
+
+			it( "frees a connection's budget when it closes", () => {
+				variables.clientEvents.consume( "conn-1" );
+				variables.clientEvents.release( "conn-1" );
+
+				for ( var i = 1; i <= variables.clientEvents.maxEventsPerSecond(); i++ ) {
+					expect( variables.clientEvents.consume( "conn-1" ) ).toBeTrue();
+				}
+			} );
+
+		} );
+
+		describe( "housekeeping", () => {
+
+			beforeEach( () => reset() );
+
+			it( "purges budgets for connections that have gone quiet", () => {
+				variables.clientEvents.consume( "old-conn" );
+
+				var store = application.pulselyClientEventRates;
+				store[ "old-conn" ].second = int( getTickCount() / 1000 ) - 5000;
+
+				expect( variables.clientEvents.purgeExpired() ).toBe( 1 );
+				expect( application.pulselyClientEventRates ).toBeEmpty();
+			} );
+
+			it( "keeps budgets for connections still in use", () => {
+				variables.clientEvents.consume( "live-conn" );
+
+				expect( variables.clientEvents.purgeExpired() ).toBe( 0 );
+			} );
+
+		} );
+
+	}
+
+}

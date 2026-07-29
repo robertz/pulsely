@@ -1,0 +1,129 @@
+/**
+ * Authorization for private-/presence- prefixed channels.
+ *
+ * A channel is gated only if the app has a matching rule in channel_auth_rules.
+ * When that rule carries an auth_webhook_url we delegate the yes/no to the
+ * customer's own endpoint, which is the Pusher auth-endpoint model.
+ */
+class singleton {
+
+	variables.DSN = "pulsely";
+	variables.WEBHOOK_TIMEOUT_SECONDS = 5;
+
+	function init() {
+		return this;
+	}
+
+	/**
+	 * The most specific matching rule wins, where "specific" means the longest
+	 * pattern. channel_auth_rules has no unique key on (app_id, channel_pattern),
+	 * so without a deterministic tiebreak two equally-long patterns could
+	 * authorize differently from one request to the next.
+	 */
+	struct function findMatchingRule( required string appId, required string channelName ) {
+		var rules = queryExecute(
+			"SELECT channel_pattern, rule_type, auth_webhook_url
+			 FROM   channel_auth_rules
+			 WHERE  app_id = UNHEX(:appId)
+			 ORDER BY CHAR_LENGTH(channel_pattern) DESC, created_at DESC",
+			{ appId : { value : appId, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+
+		for ( var row in rules ) {
+			if ( patternMatches( row.channel_pattern, channelName ) ) {
+				return {
+					channelPattern : row.channel_pattern,
+					ruleType       : row.rule_type,
+					authWebhookUrl : row.auth_webhook_url ?: ""
+				};
+			}
+		}
+
+		return {};
+	}
+
+	/**
+	 * Glob semantics, not STOMP topic semantics: `*` matches any run of characters
+	 * because channel names are opaque strings here, not dot-delimited segments.
+	 */
+	boolean function patternMatches( required string pattern, required string channelName ) {
+		var regex = "^" & reReplace( pattern, "([\.\+\?\^\$\(\)\[\]\{\}\|\\])", "\\\1", "all" )
+			.replace( "*", ".*", "all" ) & "$";
+		return reFindNoCase( regex, channelName ) > 0;
+	}
+
+	/**
+	 * Ask the customer's endpoint whether a subscription is allowed, and for
+	 * presence channels who the subscriber is.
+	 *
+	 * @return { authorized : boolean, userId : string, userInfo : struct }
+	 *         Authorized is true only on an explicit affirmative. Any transport
+	 *         failure, timeout, non-200 or malformed body denies.
+	 */
+	struct function requestAuthorization(
+		required string webhookUrl,
+		required string channelName,
+		required string socketId,
+		required string userToken
+	) {
+		var denied = { authorized : false, userId : "", userInfo : {} };
+
+		try {
+			bx:http
+				url         = webhookUrl
+				method      = "POST"
+				timeout     = variables.WEBHOOK_TIMEOUT_SECONDS
+				throwOnError= false
+				result      = "local.webhookResult"
+			{
+				bx:httpparam type="header" name="Content-Type" value="application/json";
+				bx:httpparam type="body" value=#jsonSerialize( {
+					"channel_name" : channelName,
+					"socket_id"    : socketId,
+					"user_token"   : userToken
+				} )#;
+			}
+
+			if ( val( local.webhookResult.status_code ?: 0 ) != 200 ) {
+				return denied;
+			}
+
+			var body = local.webhookResult.fileContent ?: "";
+			if ( !isJSON( body ) ) {
+				return denied;
+			}
+
+			var parsed = jsonDeserialize( body );
+			if ( !isStruct( parsed ) || !( parsed.authorized ?: false ) ) {
+				return denied;
+			}
+
+			// Presence channels need an identity. The endpoint owns it; we fall back
+			// to the connection's token identity so a customer who only answers
+			// yes/no still gets a working member list.
+			var userInfo = parsed.user_info ?: {};
+
+			return {
+				authorized : true,
+				userId     : toString( parsed.user_id ?: "" ),
+				userInfo   : isStruct( userInfo ) ? userInfo : {}
+			};
+		} catch ( any e ) {
+			return denied;
+		}
+	}
+
+	/**
+	 * Yes/no form, for channels where identity is irrelevant.
+	 */
+	boolean function callAuthWebhook(
+		required string webhookUrl,
+		required string channelName,
+		required string socketId,
+		required string userToken
+	) {
+		return requestAuthorization( webhookUrl, channelName, socketId, userToken ).authorized;
+	}
+
+}

@@ -1,0 +1,95 @@
+/**
+ * Optional message history / replay. Only active for plans with
+ * allows_message_history = 1, bounded by the plan's history_retention_hours.
+ */
+class singleton {
+
+	variables.DSN = "pulsely";
+	variables.REPLAY_LIMIT = 50;
+
+	function init() {
+		return this;
+	}
+
+	function record(
+		required string appId,
+		required string channelName,
+		required string eventName,
+		required string payloadJSON
+	) {
+		queryExecute(
+			"INSERT INTO channel_messages (id, app_id, channel_name, event_name, payload)
+			 VALUES (UNHEX(REPLACE(UUID(), '-', '')), UNHEX(:appId), :channelName, :eventName, :payload)",
+			{
+				appId       : { value : appId, type : "varchar" },
+				channelName : { value : channelName, type : "varchar" },
+				eventName   : { value : eventName, type : "varchar" },
+				payload     : { value : payloadJSON, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+	}
+
+	/**
+	 * Oldest-first so a subscriber can replay straight into its event handler and
+	 * end up in the same order live messages will arrive in.
+	 */
+	array function getRecent(
+		required string appId,
+		required string channelName,
+		required numeric retentionHours,
+		numeric limit = variables.REPLAY_LIMIT
+	) {
+		if ( retentionHours <= 0 ) {
+			return [];
+		}
+
+		var result = queryExecute(
+			"SELECT * FROM (
+			     SELECT event_name, payload, created_at
+			     FROM   channel_messages
+			     WHERE  app_id = UNHEX(:appId)
+			       AND  channel_name = :channelName
+			       AND  created_at >= DATE_SUB(NOW(3), INTERVAL :retentionHours HOUR)
+			     ORDER BY created_at DESC
+			     LIMIT :maxRows
+			 ) recent
+			 ORDER BY created_at ASC",
+			{
+				appId          : { value : appId, type : "varchar" },
+				channelName    : { value : channelName, type : "varchar" },
+				retentionHours : { value : retentionHours, type : "integer" },
+				maxRows        : { value : limit, type : "integer" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return result.reduce( ( acc, row ) => {
+			acc.append( {
+				"event"      : row.event_name,
+				"data"       : isJSON( row.payload ) ? jsonDeserialize( row.payload ) : row.payload,
+				"created_at" : dateTimeFormat( row.created_at, "yyyy-mm-dd'T'HH:nn:ss.lll" ),
+				"replayed"   : true
+			} );
+			return acc;
+		}, [] );
+	}
+
+	/**
+	 * Retention is per-plan, so the cutoff has to be evaluated per app rather than
+	 * as one global DELETE.
+	 */
+	numeric function purgeExpired() {
+		var purged = queryExecute(
+			"DELETE cm FROM channel_messages cm
+			 JOIN apps a ON a.id = cm.app_id
+			 JOIN accounts acc ON acc.id = a.account_id
+			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
+			 WHERE cm.created_at < DATE_SUB(NOW(3), INTERVAL COALESCE(p.history_retention_hours, 0) HOUR)",
+			{},
+			{ datasource : variables.DSN, result : "local.purgeResult" }
+		);
+		return local.purgeResult.recordCount ?: 0;
+	}
+
+}

@@ -1,0 +1,81 @@
+<bx:output>
+<div class="page-head">
+	<div>
+		<a class="back" href="/dashboard">&larr; My dashboard</a>
+		<h1>Accounts</h1>
+		<p class="muted">Every account on this installation.</p>
+	</div>
+	<a class="btn btn-ghost" href="/admin/monitor">Monitor apps &amp; connections</a>
+</div>
+
+<bx:if len( prc.notice )>
+	<div class="notice">#encodeForHTML( prc.notice )#</div>
+</bx:if>
+<bx:if len( prc.adminError )>
+	<div class="alert">#encodeForHTML( prc.adminError )#</div>
+</bx:if>
+
+<section class="card">
+	<table class="table">
+		<thead>
+			<tr>
+				<th>Account</th><th>Plan</th><th>Apps</th><th>Messages today</th>
+				<th>Status</th><th></th>
+			</tr>
+		</thead>
+		<tbody>
+			<bx:loop array="#prc.accounts#" index="row">
+				<tr>
+					<td>
+						<a href="/admin/account/#encodeForHTMLAttribute( row.accountId )#">#encodeForHTML( row.email )#</a>
+						<bx:if row.isAdmin><span class="pill pill-ok">admin</span></bx:if>
+						<div class="muted small">#encodeForHTML( row.name )# &middot; joined #encodeForHTML( row.createdAt )#</div>
+					</td>
+					<td>
+						<form method="post" action="/admin/setPlan" class="inline-form">
+							#csrfField()#
+							<input type="hidden" name="accountId" value="#encodeForHTMLAttribute( row.accountId )#">
+							<select name="planId" onchange="this.form.submit()">
+								<bx:loop array="#prc.plans#" index="plan">
+									<option value="#encodeForHTMLAttribute( plan.planId )#"
+										<bx:if plan.name eq row.planName>selected</bx:if>>#encodeForHTML( plan.name )#</option>
+								</bx:loop>
+							</select>
+							<noscript><button class="btn btn-sm" type="submit">Set</button></noscript>
+						</form>
+					</td>
+					<td>#row.appCount#</td>
+					<td>#numberFormat( row.messagesToday )#</td>
+					<td>
+						<bx:if row.isActive>
+							<span class="pill pill-ok">active</span>
+						<bx:else>
+							<span class="pill pill-off">suspended</span>
+						</bx:if>
+					</td>
+					<td class="admin-actions">
+						<form method="post" action="/admin/setActive">
+							#csrfField()#
+							<input type="hidden" name="accountId" value="#encodeForHTMLAttribute( row.accountId )#">
+							<input type="hidden" name="active" value="#row.isActive ? 1 : 0#">
+							<button class="btn btn-ghost btn-sm" type="submit"
+								<bx:if row.accountId eq prc.account.accountId>disabled title="You cannot suspend your own account"</bx:if>>
+								#row.isActive ? 'Suspend' : 'Reactivate'#
+							</button>
+						</form>
+						<form method="post" action="/admin/setAdmin">
+							#csrfField()#
+							<input type="hidden" name="accountId" value="#encodeForHTMLAttribute( row.accountId )#">
+							<input type="hidden" name="admin" value="#row.isAdmin ? 1 : 0#">
+							<button class="btn btn-ghost btn-sm" type="submit"
+								<bx:if row.accountId eq prc.account.accountId>disabled title="You cannot remove your own access"</bx:if>>
+								#row.isAdmin ? 'Revoke admin' : 'Make admin'#
+							</button>
+						</form>
+					</td>
+				</tr>
+			</bx:loop>
+		</tbody>
+	</table>
+</section>
+</bx:output>

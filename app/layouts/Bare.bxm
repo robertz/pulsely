@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Pulsely</title>
+	<link rel="stylesheet" href="/assets/css/base.css">
+	<link rel="stylesheet" href="/assets/css/marketing.css">
+</head>
+<body>
+<div class="auth-shell">
+
+	<header class="site-header">
+		<div class="wrap">
+			<a class="brand" href="/"><span class="brand-mark"></span>Pulsely</a>
+			<nav class="site-nav">
+				<a class="nav-link" href="/#features">Features</a>
+				<a class="nav-link" href="/#pricing">Pricing</a>
+			</nav>
+		</div>
+	</header>
+
+	<div class="auth-body">
+		<bx:output>#renderView()#</bx:output>
+	</div>
+
+</div>
+</body>
+</html>

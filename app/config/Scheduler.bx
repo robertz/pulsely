@@ -1,0 +1,34 @@
+class {
+
+	function configure() {
+
+		task( "flush-peak-connections" )
+			.call( () => getInstance( "MeteringService" ).flushPeakConnections() )
+			.every( 1, "minutes" );
+
+		task( "purge-expired-history" )
+			.call( () => getInstance( "HistoryService" ).purgeExpired() )
+			.every( 1, "hours" );
+
+		// Keeps the in-memory throttle store from growing without bound.
+		task( "purge-login-attempts" )
+			.call( () => getInstance( "LoginThrottleService" ).purgeExpired() )
+			.every( 15, "minutes" );
+
+		task( "purge-client-event-rates" )
+			.call( () => getInstance( "ClientEventService" ).purgeExpired() )
+			.every( 5, "minutes" );
+
+		// Drains the webhook queue. Frequent, because a customer waiting on an
+		// event should not feel the delay; retries back off on their own.
+		task( "deliver-webhooks" )
+			.call( () => getInstance( "WebhookService" ).deliverPending() )
+			.every( 5, "seconds" );
+
+		task( "purge-webhook-deliveries" )
+			.call( () => getInstance( "WebhookService" ).purgeDelivered() )
+			.every( 1, "hours" );
+
+	}
+
+}

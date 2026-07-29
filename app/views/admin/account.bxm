@@ -1,0 +1,48 @@
+<bx:output>
+<div class="page-head">
+	<div>
+		<a class="back" href="/admin">&larr; All accounts</a>
+		<h1>#encodeForHTML( prc.viewing.email )#</h1>
+		<p class="muted">
+			#encodeForHTML( prc.viewing.name )# &middot; #encodeForHTML( prc.viewing.planName )# plan
+			&middot; joined #encodeForHTML( prc.viewing.createdAt )#
+			<bx:if prc.viewing.isAdmin> &middot; <span class="pill pill-ok">administrator</span></bx:if>
+			<bx:if not prc.viewing.isActive> &middot; <span class="pill pill-off">suspended</span></bx:if>
+		</p>
+	</div>
+</div>
+
+<section class="card">
+	<h2>Apps</h2>
+	<bx:if arrayLen( prc.apps ) eq 0>
+		<p class="muted">This account has no apps.</p>
+	<bx:else>
+		<table class="table">
+			<thead>
+				<tr><th>App</th><th>Key</th><th>Effective plan</th><th>Messages today</th><th>Status</th></tr>
+			</thead>
+			<tbody>
+				<bx:loop array="#prc.apps#" index="app">
+					<tr>
+						<td>#encodeForHTML( app.name )#</td>
+						<td><code>#encodeForHTML( app.appKey )#</code></td>
+						<td>#encodeForHTML( app.effectivePlan )#</td>
+						<td>#numberFormat( app.messagesToday )#</td>
+						<td>
+							<bx:if app.isActive>
+								<span class="pill pill-ok">active</span>
+							<bx:else>
+								<span class="pill pill-off">paused</span>
+							</bx:if>
+						</td>
+					</tr>
+				</bx:loop>
+			</tbody>
+		</table>
+		<p class="muted small">
+			App secrets are deliberately not shown here. Administration covers plans and
+			access, not reading a customer's credentials.
+		</p>
+	</bx:if>
+</section>
+</bx:output>

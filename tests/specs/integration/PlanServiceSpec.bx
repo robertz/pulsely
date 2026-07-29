@@ -1,0 +1,124 @@
+/**
+ * The pricing section renders straight from these rows, so published prices and
+ * limits cannot drift away from what the broker enforces.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll() {
+		variables.plans = new app.models.PlanService();
+	}
+
+	function run() {
+
+		describe( "getPublicPlans()", () => {
+
+			it( "returns the seeded active plans", () => {
+				var list = variables.plans.getPublicPlans();
+
+				expect( list.len() ).toBeGTE( 3 );
+				expect( list.map( ( p ) => p.name ) ).toInclude( "Sandbox" );
+				expect( list.map( ( p ) => p.name ) ).toInclude( "Business" );
+			} );
+
+			it( "orders cheapest first so the free tier leads", () => {
+				var list = variables.plans.getPublicPlans();
+
+				expect( list[ 1 ].name ).toBe( "Sandbox" );
+				expect( list[ 1 ].priceCents ).toBe( 0 );
+
+				for ( var i = 2; i <= list.len(); i++ ) {
+					expect( list[ i ].priceCents ).toBeGTE( list[ i - 1 ].priceCents );
+				}
+			} );
+
+			it( "labels the free tier and leaves the currency symbol to the template", () => {
+				var list = variables.plans.getPublicPlans();
+
+				expect( list[ 1 ].isFree ).toBeTrue();
+				expect( list[ 1 ].priceLabel ).toBe( "Free" );
+
+				for ( var plan in list ) {
+					if ( !plan.isFree ) {
+						expect( plan.priceLabel ).toMatch( "^[0-9,]+$", "price label should be a bare number" );
+					}
+				}
+			} );
+
+			it( "converts cents to whole dollars", () => {
+				var startup = variables.plans.getPublicPlans().filter( ( p ) => p.name == "Startup" );
+
+				expect( startup.len() ).toBe( 1 );
+				expect( startup[ 1 ].priceCents ).toBe( 4900 );
+				expect( startup[ 1 ].priceLabel ).toBe( "49" );
+				expect( startup[ 1 ].isFree ).toBeFalse();
+			} );
+
+			/**
+			 * TINYINT(1) comes back from the driver as a Boolean; reading it with
+			 * val() would report every plan feature as switched off.
+			 */
+			it( "reads plan feature flags as real booleans", () => {
+				var byName = {};
+				for ( var plan in variables.plans.getPublicPlans() ) {
+					byName[ plan.name ] = plan;
+				}
+
+				expect( byName.Sandbox.privateChannels ).toBeFalse();
+				expect( byName.Sandbox.messageHistory ).toBeFalse();
+
+				expect( byName.Startup.privateChannels ).toBeTrue();
+				expect( byName.Startup.presenceChannels ).toBeFalse();
+
+				expect( byName.Business.privateChannels ).toBeTrue();
+				expect( byName.Business.presenceChannels ).toBeTrue();
+				expect( byName.Business.messageHistory ).toBeTrue();
+				expect( byName.Business.retentionHours ).toBe( 24 );
+			} );
+
+			it( "features exactly one plan, and not the free one", () => {
+				var list = variables.plans.getPublicPlans();
+				var featured = list.filter( ( p ) => p.featured );
+
+				expect( featured.len() ).toBe( 1 );
+				expect( featured[ 1 ].priceCents ).toBeGT( 0, "the highlighted plan should be a paid one" );
+			} );
+
+			it( "never exposes an inactive plan", () => {
+				queryExecute(
+					"INSERT INTO plans (id, name, connection_limit, message_daily_limit, price_cents, is_active)
+					 VALUES (UNHEX('bb000000000000000000000000000099'), 'Retired Spec Plan', 1, 1, 1, 0)
+					 ON DUPLICATE KEY UPDATE is_active = 0",
+					{},
+					{ datasource : "pulsely" }
+				);
+
+				try {
+					expect( variables.plans.getPublicPlans().map( ( p ) => p.name ) )
+						.notToInclude( "Retired Spec Plan" );
+				} finally {
+					queryExecute(
+						"DELETE FROM plans WHERE id = UNHEX('bb000000000000000000000000000099')",
+						{},
+						{ datasource : "pulsely" }
+					);
+				}
+			} );
+
+			it( "exposes the limits the broker actually enforces", () => {
+				var sandbox = variables.plans.getPublicPlans().filter( ( p ) => p.name == "Sandbox" )[ 1 ];
+
+				var enforced = queryExecute(
+					"SELECT connection_limit, message_daily_limit FROM plans WHERE name = 'Sandbox'",
+					{},
+					{ datasource : "pulsely" }
+				);
+
+				expect( sandbox.connectionLimit ).toBe( enforced.connection_limit[ 1 ] );
+				expect( sandbox.messageDailyLimit ).toBe( enforced.message_daily_limit[ 1 ] );
+			} );
+
+		} );
+
+	}
+
+}

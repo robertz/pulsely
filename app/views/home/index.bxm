@@ -1,0 +1,577 @@
+<bx:output>
+
+<section class="hero">
+	<svg class="hero-canvas" viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+		<defs>
+			<pattern id="heroGrid" width="34" height="34" patternUnits="userSpaceOnUse">
+				<circle cx="1.5" cy="1.5" r="1.5" fill="currentColor"/>
+			</pattern>
+			<radialGradient id="heroFade" cx="50%" cy="34%" r="62%">
+				<stop offset="0%" stop-color="##fff" stop-opacity=".85"/>
+				<stop offset="100%" stop-color="##fff" stop-opacity="0"/>
+			</radialGradient>
+			<mask id="heroMask">
+				<rect width="1200" height="620" fill="url(##heroFade)"/>
+			</mask>
+		</defs>
+		<rect width="1200" height="620" fill="url(##heroGrid)" mask="url(##heroMask)"/>
+	</svg>
+
+	<div class="wrap">
+		<span class="hero-badge">
+			<span class="tag">New</span>
+			Message history &amp; replay on every paid plan
+		</span>
+
+		<h1>Realtime for your app,<br><span class="grad">without the plumbing.</span></h1>
+
+		<p class="hero-sub">
+			Ship live dashboards, notifications, and collaborative features in an afternoon.
+			Publish from your backend with one signed HTTP call. Subscribe in the browser with
+			a few lines of JavaScript. We run the sockets.
+		</p>
+
+		<div class="hero-actions">
+			<a class="btn btn-primary btn-lg" href="/dashboard/signup">Start free &rarr;</a>
+			<a class="btn btn-lg" href="/##how">See how it works</a>
+		</div>
+
+		<p class="hero-reassure">
+			<strong>No credit card.</strong> Free Sandbox plan &mdash; 200,000 messages a day,
+			100 concurrent connections. Your first channel is live in minutes.
+		</p>
+
+		<div class="code-split">
+			<div class="code-card">
+				<div class="code-head">
+					<span class="code-dots"><i></i><i></i><i></i></span>
+					<span class="code-title">your backend</span>
+				</div>
+<pre><span class="tok-com">// Publish an event. One signed POST — no socket to manage.</span>
+<span class="tok-fn">await</span> fetch(<span class="tok-str">`/apps/${appId}/events`</span>, {
+  method: <span class="tok-str">"POST"</span>,
+  headers: {
+    <span class="tok-key">"X-Pulsely-Timestamp"</span>: ts,
+    <span class="tok-key">"X-Pulsely-Signature"</span>: signature
+  },
+  body: JSON.<span class="tok-fn">stringify</span>({
+    channel: <span class="tok-str">"orders"</span>,
+    event:   <span class="tok-str">"created"</span>,
+    data:    { id: <span class="tok-str">42</span>, total: <span class="tok-str">1999</span> }
+  })
+});</pre>
+			</div>
+
+			<div class="code-card">
+				<div class="code-head">
+					<span class="code-dots"><i></i><i></i><i></i></span>
+					<span class="code-title">your frontend</span>
+				</div>
+<pre><span class="tok-com">// Subscribe. Your app key is public and safe to ship.</span>
+<span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"bp_your_app_key"</span>);
+
+<span class="tok-fn">await</span> bp.<span class="tok-fn">connect</span>();
+
+bp.<span class="tok-fn">subscribe</span>(<span class="tok-str">"orders"</span>);
+
+bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (order) =&gt; {
+  renderOrder(order);
+});</pre>
+			</div>
+		</div>
+	</div>
+</section>
+
+<section class="section section-alt" id="features">
+	<div class="wrap">
+		<div class="section-head">
+			<span class="eyebrow">Why Pulsely</span>
+			<h2>Everything you need to go realtime. Nothing you don't.</h2>
+			<p>
+				A hosted pub/sub broker with tenant isolation, channel authorization, and usage
+				metering built in — so you are not running a socket fleet to send a few thousand events.
+			</p>
+		</div>
+
+		<div class="feature-grid">
+			<div class="feature is-highlight">
+				<span class="feature-flag">Differentiator</span>
+				<div class="feature-icon">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M3 3v6h6"/><path d="M3.5 9a9 9 0 1 0 2.1-3.4L3 9"/><path d="M12 7v5l3 2"/>
+					</svg>
+				</div>
+				<h3>Message history &amp; replay</h3>
+				<p>
+					Late subscribers catch up automatically. On subscribe we replay recent messages
+					in their original order, bounded by your plan's retention window, before the
+					live stream starts. No separate backfill endpoint to build.
+				</p>
+			</div>
+
+			<div class="feature">
+				<div class="feature-icon">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 22V12"/><path d="m3 7 9 5 9-5"/>
+					</svg>
+				</div>
+				<h3>Hard tenant isolation</h3>
+				<p>
+					Every app is its own namespace. A connection authenticated for one app cannot
+					subscribe outside it — enforced at the broker on every single subscribe, not
+					by convention.
+				</p>
+			</div>
+
+			<div class="feature">
+				<div class="feature-icon">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+					</svg>
+				</div>
+				<h3>Private &amp; presence channels</h3>
+				<p>
+					Channels prefixed <code>private-</code> call your own auth endpoint before a
+					subscription is allowed. <code>presence-</code> channels go further and keep a
+					live roster of who is in the room, with join and leave events &mdash; and a
+					user with three tabs open still counts as one member.
+				</p>
+			</div>
+
+			<div class="feature">
+				<div class="feature-icon">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/><path d="M9 20v-4l3 2 3-2v4"/>
+					</svg>
+				</div>
+				<h3>Signed trigger API</h3>
+				<p>
+					Publishing is a single HMAC-signed POST. The signature covers the path, body,
+					and timestamp, so a captured request cannot be replayed against another app or
+					with a swapped payload.
+				</p>
+			</div>
+
+			<div class="feature">
+				<div class="feature-icon">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>
+					</svg>
+				</div>
+				<h3>Standard STOMP, no lock-in</h3>
+				<p>
+					The wire protocol is STOMP over WebSocket. Our SDK is a thin convenience layer —
+					any STOMP client can talk to us, so your realtime layer is never a one-way door.
+				</p>
+			</div>
+
+			<div class="feature">
+				<div class="feature-icon">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/>
+					</svg>
+				</div>
+				<h3>Usage you can watch live</h3>
+				<p>
+					Messages, live connections, and peak concurrency stream into your dashboard as
+					they happen — over Pulsely itself. We use our own product to build it.
+				</p>
+			</div>
+		</div>
+	</div>
+</section>
+
+<section class="section" id="how">
+	<div class="wrap">
+		<div class="section-head">
+			<span class="eyebrow">How it works</span>
+			<h2>From zero to a live channel</h2>
+			<p>
+				No infrastructure to provision, no connection pool to size, no sticky sessions to
+				configure. The first three steps are all you need to ship; the last two are there
+				when you want them.
+			</p>
+		</div>
+
+		<figure class="arch-figure">
+			<svg class="arch-svg" viewBox="0 0 980 320" role="img"
+				aria-label="Your backend sends one signed POST to the Pulsely broker, which fans the event out over WebSocket to every subscribed browser.">
+				<defs>
+					<linearGradient id="archMark" x1="0" y1="0" x2="1" y2="1">
+						<stop offset="0%" stop-color="var(--accent)"/>
+						<stop offset="100%" stop-color="var(--accent-2)"/>
+					</linearGradient>
+				</defs>
+
+				<!--- backend --->
+				<rect class="arch-node" x="8" y="112" width="182" height="92" rx="12"/>
+				<text class="arch-label" x="99" y="151" text-anchor="middle">Your backend</text>
+				<text class="arch-sub" x="99" y="173" text-anchor="middle">any language</text>
+
+				<!--- backend to broker --->
+				<path class="arch-wire" d="M190 158 H378"/>
+				<path class="arch-head" d="m370 152 8 6-8 6"/>
+				<text class="arch-sub" x="284" y="142" text-anchor="middle">signed POST</text>
+				<circle class="arch-packet" cx="0" cy="158" r="4"/>
+
+				<!--- broker --->
+				<rect class="arch-node is-accent" x="378" y="72" width="214" height="172" rx="14"/>
+				<rect x="400" y="94" width="22" height="22" rx="6" fill="url(##archMark)"/>
+				<text class="arch-label" x="432" y="111">Pulsely</text>
+				<path class="arch-rule" d="M400 136 H570"/>
+				<circle class="arch-dot" cx="405" cy="160" r="3"/>
+				<text class="arch-sub" x="418" y="164">channel authorization</text>
+				<circle class="arch-dot" cx="405" cy="188" r="3"/>
+				<text class="arch-sub" x="418" y="192">history &amp; replay</text>
+				<circle class="arch-dot" cx="405" cy="216" r="3"/>
+				<text class="arch-sub" x="418" y="220">presence roster</text>
+
+				<!--- fan-out --->
+				<path class="arch-wire" d="M592 158 C 670 158, 680 78, 752 78"/>
+				<path class="arch-wire" d="M592 158 H752"/>
+				<path class="arch-wire" d="M592 158 C 670 158, 680 238, 752 238"/>
+				<path class="arch-head" d="m744 72 8 6-8 6"/>
+				<path class="arch-head" d="m744 152 8 6-8 6"/>
+				<path class="arch-head" d="m744 232 8 6-8 6"/>
+
+				<circle class="arch-packet is-fan1" cx="0" cy="0" r="3.5"/>
+				<circle class="arch-packet is-fan2" cx="0" cy="0" r="3.5"/>
+				<circle class="arch-packet is-fan3" cx="0" cy="0" r="3.5"/>
+
+				<!--- subscribers --->
+				<rect class="arch-node" x="752" y="46" width="220" height="64" rx="11"/>
+				<circle class="arch-live" cx="774" cy="78" r="3.5"/>
+				<text class="arch-label is-sm" x="790" y="74">Browser</text>
+				<text class="arch-sub" x="790" y="93">subscribed to orders</text>
+
+				<rect class="arch-node" x="752" y="126" width="220" height="64" rx="11"/>
+				<circle class="arch-live" cx="774" cy="158" r="3.5"/>
+				<text class="arch-label is-sm" x="790" y="154">Browser</text>
+				<text class="arch-sub" x="790" y="173">subscribed to orders</text>
+
+				<rect class="arch-node" x="752" y="206" width="220" height="64" rx="11"/>
+				<circle class="arch-live" cx="774" cy="238" r="3.5"/>
+				<text class="arch-label is-sm" x="790" y="234">Browser</text>
+				<text class="arch-sub" x="790" y="253">subscribed to orders</text>
+
+				<text class="arch-sub" x="672" y="302" text-anchor="middle">WebSocket &middot; STOMP</text>
+			</svg>
+			<figcaption>
+				One signed call in, every subscriber out &mdash; authorization, replay, and presence
+				handled at the broker.
+			</figcaption>
+		</figure>
+
+		<div class="walkthrough" id="walkthrough">
+			<div class="tablist" role="tablist" aria-label="How Pulsely works">
+				<button class="tab" role="tab" id="tab-create" aria-controls="panel-create" aria-selected="true">
+					<span class="tab-num">1</span> Create an app
+				</button>
+				<button class="tab" role="tab" id="tab-subscribe" aria-controls="panel-subscribe" aria-selected="false">
+					<span class="tab-num">2</span> Subscribe
+				</button>
+				<button class="tab" role="tab" id="tab-publish" aria-controls="panel-publish" aria-selected="false">
+					<span class="tab-num">3</span> Publish
+				</button>
+				<button class="tab" role="tab" id="tab-secure" aria-controls="panel-secure" aria-selected="false">
+					<span class="tab-num">4</span> Lock it down
+				</button>
+				<button class="tab" role="tab" id="tab-replay" aria-controls="panel-replay" aria-selected="false">
+					<span class="tab-num">5</span> Replay history
+				</button>
+			</div>
+
+			<!-- 1 -------------------------------------------------------------- -->
+			<div class="panel" role="tabpanel" id="panel-create" aria-labelledby="tab-create">
+				<div class="panel-copy">
+					<h3>Name your app and take your keys</h3>
+					<p>
+						An app is an isolated pub/sub namespace. Create one in the dashboard and three
+						credentials appear immediately — no provisioning step, no waiting.
+					</p>
+					<ul class="panel-list">
+						<li><strong>App ID</strong> — identifies the app in the trigger API URL.</li>
+						<li><strong>App key</strong> — public. Ship it in your frontend bundle.</li>
+						<li><strong>App secret</strong> — server-side only. It signs your publishes and must never reach a browser.</li>
+					</ul>
+					<p class="panel-note">
+						Channels are created implicitly. There is nothing to register — publish to
+						<code>orders</code> and the channel exists.
+					</p>
+				</div>
+
+				<div class="code-card">
+					<div class="code-head">
+						<span class="code-dots"><i></i><i></i><i></i></span>
+						<span class="code-title">your credentials</span>
+					</div>
+<pre><span class="tok-com">## From the dashboard, per app</span>
+APP_ID     = <span class="tok-str">"a3f19c42e8b7415d9c02e77a1b5d6e30"</span>
+APP_KEY    = <span class="tok-str">"bp_9f2c41ad77be0c3518ea6b94"</span>
+APP_SECRET = <span class="tok-str">"3b8e...ac71"</span>  <span class="tok-com">## keep on the server</span></pre>
+				</div>
+			</div>
+
+			<!-- 2 -------------------------------------------------------------- -->
+			<div class="panel" role="tabpanel" id="panel-subscribe" aria-labelledby="tab-subscribe" hidden>
+				<div class="panel-copy">
+					<h3>Listen in the browser</h3>
+					<p>
+						Two script tags and four lines. The SDK opens one WebSocket and multiplexes
+						every channel over it, reconnecting on its own if the network drops.
+					</p>
+					<ul class="panel-list">
+						<li><code>connect()</code> resolves once the broker has accepted your app key.</li>
+						<li><code>subscribe()</code> takes your channel name — the app namespace is added for you.</li>
+						<li><code>bind()</code> fires per event name, with the payload you published.</li>
+					</ul>
+					<p class="panel-note">
+						Subscribing before <code>connect()</code> resolves is fine; the SDK queues it and
+						re-establishes every subscription after a reconnect.
+					</p>
+				</div>
+
+				<div class="code-card">
+					<div class="code-head">
+						<span class="code-dots"><i></i><i></i><i></i></span>
+						<span class="code-title">index.html</span>
+					</div>
+<pre>&lt;<span class="tok-key">script</span> src=<span class="tok-str">"/assets/js/vendor/stomp.umd.min.js"</span>&gt;&lt;/<span class="tok-key">script</span>&gt;
+&lt;<span class="tok-key">script</span> src=<span class="tok-str">"/assets/js/pulsely.js"</span>&gt;&lt;/<span class="tok-key">script</span>&gt;
+
+&lt;<span class="tok-key">script</span>&gt;
+  <span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"bp_9f2c41ad77be0c3518ea6b94"</span>);
+
+  <span class="tok-fn">await</span> bp.<span class="tok-fn">connect</span>();
+
+  bp.<span class="tok-fn">subscribe</span>(<span class="tok-str">"orders"</span>);
+
+  bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (data, meta) =&gt; {
+    <span class="tok-com">// meta = { channel, event, replayed }</span>
+    <span class="tok-fn">renderOrder</span>(data);
+  });
+&lt;/<span class="tok-key">script</span>&gt;</pre>
+				</div>
+			</div>
+
+			<!-- 3 -------------------------------------------------------------- -->
+			<div class="panel" role="tabpanel" id="panel-publish" aria-labelledby="tab-publish" hidden>
+				<div class="panel-copy">
+					<h3>Publish with one signed POST</h3>
+					<p>
+						Your backend never opens a socket. It signs an HTTP request with the app secret
+						and we fan it out to every subscriber on that channel.
+					</p>
+					<ul class="panel-list">
+						<li>Sign <code>METHOD \n path \n timestamp \n sha256(body)</code>, joined by newlines.</li>
+						<li>HMAC-SHA256 with your app secret, lowercase hex.</li>
+						<li>Send it as <code>X-Pulsely-Signature</code> with the epoch seconds in <code>X-Pulsely-Timestamp</code>.</li>
+					</ul>
+					<p class="panel-note">
+						Binding the path and body hash into the signature means a captured request
+						cannot be replayed against another app or with a swapped payload. Timestamps
+						more than 10 minutes out are rejected.
+					</p>
+				</div>
+
+				<div class="code-card">
+					<div class="code-head">
+						<span class="code-dots"><i></i><i></i><i></i></span>
+						<span class="code-title">publish.mjs</span>
+					</div>
+<pre><span class="tok-key">import</span> crypto <span class="tok-key">from</span> <span class="tok-str">"node:crypto"</span>;
+
+<span class="tok-key">const</span> body = JSON.<span class="tok-fn">stringify</span>({
+  channel: <span class="tok-str">"orders"</span>,
+  event:   <span class="tok-str">"created"</span>,
+  data:    { id: 42, total: 1999 }
+});
+
+<span class="tok-key">const</span> ts   = String(Math.<span class="tok-fn">floor</span>(Date.<span class="tok-fn">now</span>() / 1000));
+<span class="tok-key">const</span> path = <span class="tok-str">`/apps/${APP_ID}/events`</span>;
+<span class="tok-key">const</span> hash = crypto.<span class="tok-fn">createHash</span>(<span class="tok-str">"sha256"</span>)
+  .<span class="tok-fn">update</span>(body).<span class="tok-fn">digest</span>(<span class="tok-str">"hex"</span>);
+
+<span class="tok-key">const</span> signature = crypto
+  .<span class="tok-fn">createHmac</span>(<span class="tok-str">"sha256"</span>, APP_SECRET)
+  .<span class="tok-fn">update</span>(<span class="tok-str">`POST\n${path}\n${ts}\n${hash}`</span>)
+  .<span class="tok-fn">digest</span>(<span class="tok-str">"hex"</span>);
+
+<span class="tok-fn">await</span> fetch(BASE_URL + path, {
+  method: <span class="tok-str">"POST"</span>,
+  headers: {
+    <span class="tok-key">"Content-Type"</span>:           <span class="tok-str">"application/json"</span>,
+    <span class="tok-key">"X-Pulsely-Timestamp"</span>:  ts,
+    <span class="tok-key">"X-Pulsely-Signature"</span>:  signature
+  },
+  body
+});</pre>
+				</div>
+			</div>
+
+			<!-- 4 -------------------------------------------------------------- -->
+			<div class="panel" role="tabpanel" id="panel-secure" aria-labelledby="tab-secure" hidden>
+				<div class="panel-copy">
+					<h3>Keep private data private</h3>
+					<p>
+						Prefix a channel <code>private-</code> or <code>presence-</code> and nobody
+						subscribes without your say-so. We call your endpoint and honour its answer —
+						the authorization logic stays in your app, where the user session lives.
+					</p>
+					<ul class="panel-list">
+						<li>Add a rule in the dashboard: a pattern like <code>private-order-*</code> and your endpoint URL.</li>
+						<li>We POST <code>channel_name</code>, <code>socket_id</code> and <code>user_token</code> to it.</li>
+						<li>Reply <code>{"authorized": true}</code> to allow.</li>
+						<li>For <code>presence-</code> channels, add <code>user_id</code> and <code>user_info</code> and the subscriber joins the roster.</li>
+					</ul>
+					<p class="panel-note">
+						Anything other than an explicit yes denies — a timeout, a non-200, or a
+						malformed body. Failures close the door rather than open it.
+					</p>
+				</div>
+
+				<div class="code-card">
+					<div class="code-head">
+						<span class="code-dots"><i></i><i></i><i></i></span>
+						<span class="code-title">your auth endpoint</span>
+					</div>
+<pre><span class="tok-com">// POST https://your-app.com/pulsely/auth</span>
+app.<span class="tok-fn">post</span>(<span class="tok-str">"/pulsely/auth"</span>, (req, res) =&gt; {
+  <span class="tok-key">const</span> { channel_name, user_token } = req.body;
+
+  <span class="tok-com">// Your session, your rules.</span>
+  <span class="tok-key">const</span> user    = <span class="tok-fn">userFromToken</span>(user_token);
+  <span class="tok-key">const</span> orderId = channel_name.<span class="tok-fn">replace</span>(<span class="tok-str">"private-order-"</span>, <span class="tok-str">""</span>);
+
+  res.<span class="tok-fn">json</span>({
+    authorized: <span class="tok-fn">userCanSeeOrder</span>(user, orderId)
+  });
+});</pre>
+				</div>
+			</div>
+
+			<!-- 5 -------------------------------------------------------------- -->
+			<div class="panel" role="tabpanel" id="panel-replay" aria-labelledby="tab-replay" hidden>
+				<div class="panel-copy">
+					<h3>Late subscribers catch up on their own</h3>
+					<p>
+						On plans with history enabled, subscribing replays what it missed before the
+						live stream starts — in original order, bounded by your plan's retention
+						window. A tab opened five minutes late still renders the full picture.
+					</p>
+					<ul class="panel-list">
+						<li>Nothing to call. Replay happens as part of <code>subscribe()</code>.</li>
+						<li>Replayed messages hit the same <code>bind()</code> handler as live ones.</li>
+						<li><code>meta.replayed</code> tells them apart when it matters.</li>
+					</ul>
+					<p class="panel-note">
+						This is the piece teams usually end up building themselves — a backfill
+						endpoint, plus the ordering logic to stitch history onto the live stream.
+					</p>
+				</div>
+
+				<div class="code-card">
+					<div class="code-head">
+						<span class="code-dots"><i></i><i></i><i></i></span>
+						<span class="code-title">catching up</span>
+					</div>
+<pre>bp.<span class="tok-fn">subscribe</span>(<span class="tok-str">"orders"</span>);
+
+bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (data, meta) =&gt; {
+  <span class="tok-key">if</span> (meta.replayed) {
+    <span class="tok-com">// Backfill quietly — no toast, no sound.</span>
+    <span class="tok-fn">appendOrder</span>(data);
+    <span class="tok-key">return</span>;
+  }
+
+  <span class="tok-fn">appendOrder</span>(data);
+  <span class="tok-fn">notify</span>(<span class="tok-str">`New order ${data.id}`</span>);
+});</pre>
+				</div>
+			</div>
+		</div>
+
+		<div class="walkthrough-cta">
+			<a class="btn btn-primary btn-lg" href="/dashboard/signup">Create your free account &rarr;</a>
+			<span class="muted small">Free Sandbox plan &middot; no credit card</span>
+		</div>
+	</div>
+</section>
+
+<section class="section section-alt" id="pricing">
+	<div class="wrap">
+		<div class="section-head">
+			<span class="eyebrow">Pricing</span>
+			<h2>Start free. Upgrade when your traffic does.</h2>
+			<p>Every plan includes tenant isolation, the signed trigger API, and the live usage dashboard.</p>
+		</div>
+
+		<div class="price-grid">
+			<bx:loop array="#prc.plans#" index="plan">
+				<div class="price-card#plan.featured ? ' featured' : ''#">
+					<bx:if plan.featured><span class="price-tag">Most popular</span></bx:if>
+
+					<div class="price-name">#encodeForHTML( plan.name )#</div>
+
+					<div class="price-amount">
+						<span class="amount"><bx:if not plan.isFree>$</bx:if>#encodeForHTML( plan.priceLabel )#</span>
+						<bx:if not plan.isFree><span class="per">/ month</span></bx:if>
+					</div>
+					<p class="price-note">
+						<bx:if plan.priceCents eq 0>No credit card required<bx:else>Billed monthly, cancel anytime</bx:if>
+					</p>
+
+					<ul class="price-list">
+						<li><span class="check">&##10003;</span><span><strong>#numberFormat( plan.messageDailyLimit )#</strong> messages / day</span></li>
+						<li><span class="check">&##10003;</span><span><strong>#numberFormat( plan.connectionLimit )#</strong> concurrent connections</span></li>
+
+						<li class="#plan.privateChannels ? '' : 'off'#">
+							<span class="#plan.privateChannels ? 'check' : 'cross'#">#plan.privateChannels ? '&##10003;' : '&##215;'#</span>
+							<span>Private channels</span>
+						</li>
+						<li class="#plan.presenceChannels ? '' : 'off'#">
+							<span class="#plan.presenceChannels ? 'check' : 'cross'#">#plan.presenceChannels ? '&##10003;' : '&##215;'#</span>
+							<span>Presence channels</span>
+						</li>
+						<li class="#plan.messageHistory ? '' : 'off'#">
+							<span class="#plan.messageHistory ? 'check' : 'cross'#">#plan.messageHistory ? '&##10003;' : '&##215;'#</span>
+							<span>
+								<bx:if plan.messageHistory>
+									Message history &mdash; <strong>#plan.retentionHours#h</strong> replay
+								<bx:else>
+									Message history &amp; replay
+								</bx:if>
+							</span>
+						</li>
+					</ul>
+
+					<a class="btn #plan.featured ? 'btn-primary' : ''# btn-block"
+						href="/dashboard/signup">
+						#plan.priceCents eq 0 ? 'Start free' : 'Choose #encodeForHTML( plan.name )#'#
+					</a>
+				</div>
+			</bx:loop>
+		</div>
+	</div>
+</section>
+
+<section class="cta-band">
+	<svg class="cta-rings" viewBox="0 0 400 400" aria-hidden="true" focusable="false">
+		<circle cx="200" cy="200" r="46"/>
+		<circle cx="200" cy="200" r="88"/>
+		<circle cx="200" cy="200" r="130"/>
+		<circle cx="200" cy="200" r="172"/>
+	</svg>
+
+	<div class="wrap">
+		<h2>Your first realtime feature is 10 minutes away.</h2>
+		<p>Create a free account, grab your keys, and publish your first event before your coffee gets cold.</p>
+		<div class="hero-actions">
+			<a class="btn btn-primary btn-lg" href="/dashboard/signup">Create your free account &rarr;</a>
+			<a class="btn btn-lg" href="/dashboard/login">Sign in</a>
+		</div>
+		<p class="hero-reassure">Free forever on Sandbox &middot; No credit card &middot; Upgrade only when you outgrow it</p>
+	</div>
+</section>
+
+</bx:output>

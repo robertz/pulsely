@@ -1,0 +1,48 @@
+/**
+ * The reserved per-app ops channel that drives the dashboard's live tiles.
+ *
+ * Destination is `{appId}.$ops`. Customer channel names may not begin with `$`
+ * (rejected by the trigger API), so this namespace cannot be squatted or published
+ * into from outside.
+ */
+class singleton {
+
+	variables.OPS_CHANNEL = '$ops';
+	variables.OPS_USER    = '$ops';
+	variables.TOKEN_TTL_SECONDS = 3600;
+
+	function init() {
+		return this;
+	}
+
+	string function opsChannel() {
+		return variables.OPS_CHANNEL;
+	}
+
+	string function opsUser() {
+		return variables.OPS_USER;
+	}
+
+	string function opsDestination( required string appId ) {
+		return appId & "." & variables.OPS_CHANNEL;
+	}
+
+	/**
+	 * Mints the short-lived connection token the dashboard presents as its STOMP
+	 * passcode. Same format authenticate() verifies: {expires}.{userId}.{hmac}
+	 */
+	string function mintOpsToken( required string appKey, required string appSecret ) {
+		var expires = int( getTickCount() / 1000 ) + variables.TOKEN_TTL_SECONDS;
+		var signature = lcase( hmac(
+			"#appKey#:#expires#:#variables.OPS_USER#",
+			appSecret,
+			"HMACSHA256"
+		) );
+		return "#expires#.#variables.OPS_USER#.#signature#";
+	}
+
+	struct function envelope( required string eventName, required struct data ) {
+		return { "event" : eventName, "data" : data };
+	}
+
+}

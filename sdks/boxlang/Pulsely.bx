@@ -1,0 +1,131 @@
+/**
+ * Pulsely server SDK for BoxLang / CFML.
+ *
+ *   pulsely = new Pulsely(
+ *     appId     = "…",
+ *     appKey    = "…",
+ *     appSecret = "…",
+ *     baseUrl   = "https://pulsely.example.com"
+ *   );
+ *
+ *   pulsely.trigger( "orders", "created", { "id" : 42 } );
+ *
+ * The app secret must never reach a browser.
+ */
+class {
+
+	variables.appId     = "";
+	variables.appKey    = "";
+	variables.appSecret = "";
+	variables.baseUrl   = "";
+	variables.timeout   = 10;
+
+	function init(
+		required string appId,
+		required string appSecret,
+		string appKey  = "",
+		string baseUrl = "http://127.0.0.1:8085",
+		numeric timeout = 10
+	) {
+		variables.appId     = arguments.appId;
+		variables.appKey    = arguments.appKey;
+		variables.appSecret = arguments.appSecret;
+		variables.baseUrl   = arguments.baseUrl.reReplace( "/+$", "" );
+		variables.timeout   = arguments.timeout;
+		return this;
+	}
+
+	/**
+	 * Publish an event to a channel.
+	 *
+	 * @throws PulselyError on any non-2xx, with the status in the error detail.
+	 * @return the parsed response body
+	 */
+	struct function trigger( required string channel, required string event, any data = {} ) {
+		// Serialize once and send exactly these bytes. Re-serializing for the
+		// request risks a different key order and a signature that no longer
+		// matches the body — the most common cause of a puzzling 401.
+		var payload = jsonSerialize( {
+			"channel" : arguments.channel,
+			"event"   : arguments.event,
+			"data"    : arguments.data
+		} );
+
+		var path      = "/apps/" & variables.appId & "/events";
+		var timestamp = int( getTickCount() / 1000 );   // epoch SECONDS, UTC
+
+		bx:http url="#variables.baseUrl##path#" method="POST" timeout="#variables.timeout#"
+			throwOnError="false" result="local.result" {
+			bx:httpparam type="header" name="Content-Type" value="application/json";
+			bx:httpparam type="header" name="X-Pulsely-Timestamp" value="#timestamp#";
+			bx:httpparam type="header" name="X-Pulsely-Signature" value="#sign( path, timestamp, payload )#";
+			bx:httpparam type="body" value="#payload#";
+		}
+
+		var status = val( local.result.status_code ?: 0 );
+		var raw    = local.result.fileContent ?: "";
+		var body   = isJSON( raw ) ? jsonDeserialize( raw ) : { "error" : raw };
+
+		if ( status < 200 || status > 299 ) {
+			throw(
+				type    = "PulselyError",
+				message = "Pulsely: publish rejected (#status#)",
+				detail  = body.error ?: raw
+			);
+		}
+
+		return body;
+	}
+
+	/**
+	 * Mint a short-lived connection token for a browser.
+	 *
+	 * The browser presents it as the STOMP passcode; it establishes the identity
+	 * your auth endpoint later sees as `user_token`. Public channels need none.
+	 */
+	string function authToken( required string userId, numeric ttlSeconds = 3600 ) {
+		if ( !variables.appKey.len() ) {
+			throw( type = "PulselyError", message = "Pulsely: appKey is required to mint connection tokens." );
+		}
+
+		var expires = int( getTickCount() / 1000 ) + arguments.ttlSeconds;
+		var signature = lcase( hmac(
+			"#variables.appKey#:#expires#:#arguments.userId#",
+			variables.appSecret,
+			"HMACSHA256"
+		) );
+
+		return "#expires#.#arguments.userId#.#signature#";
+	}
+
+	/**
+	 * Build the response your auth endpoint returns when Pulsely asks whether a
+	 * subscriber may join a private or presence channel.
+	 *
+	 * Presence channels need userId; userInfo is echoed to every other member.
+	 */
+	struct function authorizeChannel( boolean authorized = true, string userId = "", struct userInfo = {} ) {
+		return {
+			"authorized" : arguments.authorized,
+			"user_id"    : arguments.userId,
+			"user_info"  : arguments.userInfo
+		};
+	}
+
+	/**
+	 * POST \n path \n timestamp \n sha256(body), joined by real newlines, then
+	 * HMAC-SHA256 with the app secret as lowercase hex.
+	 */
+	private string function sign( required string path, required numeric timestamp, required string payload ) {
+		// char(10), not "\n" — BoxLang does not process backslash escapes in
+		// double-quoted strings, so "\n" would be two literal characters.
+		var LF = char( 10 );
+		var signingString = "POST" & LF
+			& arguments.path & LF
+			& arguments.timestamp & LF
+			& lcase( hash( arguments.payload, "SHA-256" ) );
+
+		return lcase( hmac( signingString, variables.appSecret, "HMACSHA256" ) );
+	}
+
+}

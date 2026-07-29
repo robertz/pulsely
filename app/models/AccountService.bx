@@ -1,0 +1,413 @@
+/**
+ * Account authentication and the dashboard's read/write model.
+ *
+ * Every method that reaches app-scoped data takes the accountId and filters on it,
+ * so a guessed app id from one account can never surface another's data.
+ */
+class singleton {
+
+	property name="passwordService" inject="PasswordService";
+	property name="appService"      inject="AppService";
+
+	variables.DSN = "pulsely";
+	variables.MIN_PASSWORD_LENGTH = 8;
+
+	function init() {
+		return this;
+	}
+
+	/* -------------------------------------------------------------- auth */
+
+	struct function authenticate( required string email, required string plainPassword ) {
+		// is_active is part of the lookup, not a check afterwards: a suspended
+		// account must be indistinguishable from a wrong password.
+		var result = queryExecute(
+			"SELECT LOWER(HEX(id)) AS accountId, email, name, password_hash, is_admin
+			 FROM   accounts WHERE email = :email AND is_active = 1",
+			{ email : { value : trim( lcase( email ) ), type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+
+		if ( !result.recordCount ) {
+			return {};
+		}
+
+		if ( !passwordService.verify( plainPassword, result.password_hash[ 1 ] ) ) {
+			return {};
+		}
+
+		return {
+			accountId : result.accountId[ 1 ],
+			email     : result.email[ 1 ],
+			name      : result.name[ 1 ],
+			isAdmin   : isBoolean( result.is_admin[ 1 ] ) && result.is_admin[ 1 ]
+		};
+	}
+
+	/* ------------------------------------------------------------ signup */
+
+	/**
+	 * Validates and creates an account on the default free plan.
+	 *
+	 * @return { account : {...} } on success, or { error : "..." }. Errors are
+	 *         returned rather than thrown because every one of them is a message
+	 *         for the person filling in the form.
+	 */
+	struct function createAccount(
+		required string email,
+		required string name,
+		required string plainPassword,
+		required string confirmPassword
+	) {
+		var cleanEmail = trim( lcase( email ) );
+		var cleanName  = trim( name );
+
+		if ( !cleanName.len() ) {
+			return { error : "Please enter your name." };
+		}
+		if ( cleanName.len() > 255 ) {
+			return { error : "That name is too long." };
+		}
+		if ( !cleanEmail.len() ) {
+			return { error : "Please enter an email address." };
+		}
+		if ( cleanEmail.len() > 255 || !isValid( "email", cleanEmail ) ) {
+			return { error : "That doesn't look like a valid email address." };
+		}
+		if ( plainPassword.len() < variables.MIN_PASSWORD_LENGTH ) {
+			return { error : "Your password must be at least #variables.MIN_PASSWORD_LENGTH# characters." };
+		}
+		if ( compare( plainPassword, confirmPassword ) != 0 ) {
+			return { error : "Those passwords don't match." };
+		}
+		if ( emailExists( cleanEmail ) ) {
+			return { error : "An account already exists for that email address." };
+		}
+
+		var accountId = lcase( replace( createUUID(), "-", "", "all" ) ).left( 32 );
+		var defaultPlanId = getDefaultPlanId();
+
+		try {
+			queryExecute(
+				"INSERT INTO accounts (id, email, name, password_hash, plan_id)
+				 VALUES (UNHEX(:accountId), :email, :name, :passwordHash, UNHEX(:planId))",
+				{
+					accountId    : { value : accountId, type : "varchar" },
+					email        : { value : cleanEmail, type : "varchar" },
+					name         : { value : cleanName, type : "varchar" },
+					passwordHash : { value : passwordService.hash( plainPassword ), type : "varchar" },
+					planId       : { value : defaultPlanId, type : "varchar", null : !defaultPlanId.len() }
+				},
+				{ datasource : variables.DSN }
+			);
+		} catch ( any e ) {
+			// The unique key on accounts.email is the real guard; emailExists()
+			// above only makes the common case a friendly message rather than a 500.
+			if ( e.message.findNoCase( "duplicate" ) ) {
+				return { error : "An account already exists for that email address." };
+			}
+			rethrow;
+		}
+
+		return {
+			account : {
+				accountId : accountId,
+				email     : cleanEmail,
+				name      : cleanName
+			}
+		};
+	}
+
+	boolean function emailExists( required string email ) {
+		var result = queryExecute(
+			"SELECT 1 FROM accounts WHERE email = :email",
+			{ email : { value : trim( lcase( email ) ), type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+		return result.recordCount > 0;
+	}
+
+	/**
+	 * New accounts land on the cheapest active plan, so adding a cheaper free tier
+	 * later does not require a code change.
+	 */
+	string function getDefaultPlanId() {
+		var result = queryExecute(
+			"SELECT LOWER(HEX(id)) AS planId FROM plans
+			 WHERE is_active = 1
+			 ORDER BY price_cents ASC, created_at ASC
+			 LIMIT 1",
+			{},
+			{ datasource : variables.DSN }
+		);
+		return result.recordCount ? result.planId[ 1 ] : "";
+	}
+
+	/* -------------------------------------------------------------- apps */
+
+	query function getApps( required string accountId ) {
+		return queryExecute(
+			"SELECT  LOWER(HEX(a.id)) AS appId,
+			         a.name, a.app_key, a.is_active, a.created_at,
+			         COALESCE(p.name, 'none')       AS planName,
+			         COALESCE(p.connection_limit,0) AS connectionLimit,
+			         COALESCE(p.message_daily_limit,0) AS messageDailyLimit,
+			         COALESCE(u.messages_sent,0)    AS messagesToday,
+			         COALESCE(u.peak_connections,0) AS peakToday
+			 FROM    apps a
+			 JOIN    accounts acc ON acc.id = a.account_id
+			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
+			 LEFT JOIN usage_daily u
+			        ON u.app_id = a.id AND u.usage_date = CURRENT_DATE()
+			 WHERE   a.account_id = UNHEX(:accountId)
+			 ORDER BY a.created_at DESC",
+			{ accountId : { value : accountId, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+	}
+
+	struct function getApp( required string accountId, required string appId ) {
+		if ( !appService.isValidAppId( appId ) ) {
+			return {};
+		}
+
+		var result = queryExecute(
+			"SELECT  LOWER(HEX(a.id)) AS appId,
+			         a.name, a.app_key, a.app_secret, a.is_active, a.created_at,
+			         a.allows_client_events AS allowsClientEvents,
+			         COALESCE(p.name, 'none')          AS planName,
+			         COALESCE(p.connection_limit,0)    AS connectionLimit,
+			         COALESCE(p.message_daily_limit,0) AS messageDailyLimit,
+			         COALESCE(p.allows_message_history,0) AS allowsMessageHistory,
+			         COALESCE(p.history_retention_hours,0) AS historyRetentionHours,
+			         COALESCE(u.messages_sent,0)       AS messagesToday,
+			         COALESCE(u.peak_connections,0)    AS peakToday
+			 FROM    apps a
+			 JOIN    accounts acc ON acc.id = a.account_id
+			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
+			 LEFT JOIN usage_daily u
+			        ON u.app_id = a.id AND u.usage_date = CURRENT_DATE()
+			 WHERE   a.id = UNHEX(:appId) AND a.account_id = UNHEX(:accountId)",
+			{
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		if ( !result.recordCount ) {
+			return {};
+		}
+
+		var row = {};
+		for ( var col in result.columnList.listToArray() ) {
+			row[ col ] = result[ col ][ 1 ];
+		}
+		return row;
+	}
+
+	string function createApp( required string accountId, required string name ) {
+		var appId = lcase( replace( createUUID(), "-", "", "all" ) ).left( 32 );
+
+		queryExecute(
+			"INSERT INTO apps (id, account_id, name, app_key, app_secret)
+			 VALUES (UNHEX(:appId), UNHEX(:accountId), :name, :appKey, :appSecret)",
+			{
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" },
+				name      : { value : trim( name ), type : "varchar" },
+				appKey    : { value : "bp_" & lcase( replace( createUUID(), "-", "", "all" ) ).left( 24 ), type : "varchar" },
+				appSecret : { value : lcase( replace( createUUID(), "-", "", "all" ) ) & lcase( replace( createUUID(), "-", "", "all" ) ), type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return appId;
+	}
+
+	function setClientEvents( required string accountId, required string appId, required boolean enabled ) {
+		if ( !appService.isValidAppId( appId ) ) {
+			return;
+		}
+		queryExecute(
+			"UPDATE apps SET allows_client_events = :enabled
+			 WHERE id = UNHEX(:appId) AND account_id = UNHEX(:accountId)",
+			{
+				enabled   : { value : enabled ? 1 : 0, type : "tinyint" },
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+	}
+
+	function setAppActive( required string accountId, required string appId, required boolean active ) {
+		if ( !appService.isValidAppId( appId ) ) {
+			return;
+		}
+		queryExecute(
+			"UPDATE apps SET is_active = :active
+			 WHERE id = UNHEX(:appId) AND account_id = UNHEX(:accountId)",
+			{
+				active    : { value : active ? 1 : 0, type : "tinyint" },
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+	}
+
+	/* ------------------------------------------------------------- usage */
+
+	/**
+	 * Zero-filled so the chart has a point per day even where no row exists.
+	 */
+	array function getUsageSeries( required string accountId, required string appId, numeric days = 14 ) {
+		if ( !appService.isValidAppId( appId ) ) {
+			return [];
+		}
+
+		var rows = queryExecute(
+			"SELECT u.usage_date, u.messages_sent, u.peak_connections
+			 FROM   usage_daily u
+			 JOIN   apps a ON a.id = u.app_id
+			 WHERE  u.app_id = UNHEX(:appId)
+			   AND  a.account_id = UNHEX(:accountId)
+			   AND  u.usage_date >= DATE_SUB(CURRENT_DATE(), INTERVAL :days DAY)",
+			{
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" },
+				days      : { value : days - 1, type : "integer" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		var byDate = {};
+		for ( var row in rows ) {
+			byDate[ dateFormat( row.usage_date, "yyyy-mm-dd" ) ] = {
+				messages    : row.messages_sent,
+				connections : row.peak_connections
+			};
+		}
+
+		var series = [];
+		for ( var offset = days - 1; offset >= 0; offset-- ) {
+			var day = dateFormat( dateAdd( "d", -offset, now() ), "yyyy-mm-dd" );
+			var point = byDate[ day ] ?: { messages : 0, connections : 0 };
+			series.append( {
+				"date"        : day,
+				"messages"    : point.messages,
+				"connections" : point.connections
+			} );
+		}
+		return series;
+	}
+
+	array function getRecentMessages( required string accountId, required string appId, numeric limit = 20 ) {
+		if ( !appService.isValidAppId( appId ) ) {
+			return [];
+		}
+
+		var rows = queryExecute(
+			"SELECT cm.channel_name, cm.event_name, cm.payload, cm.created_at
+			 FROM   channel_messages cm
+			 JOIN   apps a ON a.id = cm.app_id
+			 WHERE  cm.app_id = UNHEX(:appId) AND a.account_id = UNHEX(:accountId)
+			 ORDER BY cm.created_at DESC
+			 LIMIT  :maxRows",
+			{
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" },
+				maxRows   : { value : limit, type : "integer" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return rows.reduce( ( acc, row ) => {
+			acc.append( {
+				"channel"   : row.channel_name,
+				"event"     : row.event_name,
+				"payload"   : row.payload,
+				"createdAt" : dateTimeFormat( row.created_at, "HH:nn:ss" )
+			} );
+			return acc;
+		}, [] );
+	}
+
+	/* ------------------------------------------------------- auth rules */
+
+	array function getAuthRules( required string accountId, required string appId ) {
+		if ( !appService.isValidAppId( appId ) ) {
+			return [];
+		}
+
+		var rows = queryExecute(
+			"SELECT LOWER(HEX(r.id)) AS ruleId, r.channel_pattern, r.rule_type, r.auth_webhook_url
+			 FROM   channel_auth_rules r
+			 JOIN   apps a ON a.id = r.app_id
+			 WHERE  r.app_id = UNHEX(:appId) AND a.account_id = UNHEX(:accountId)
+			 ORDER BY CHAR_LENGTH(r.channel_pattern) DESC, r.created_at DESC",
+			{
+				appId     : { value : appId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+
+		return rows.reduce( ( acc, row ) => {
+			acc.append( {
+				"ruleId"         : row.ruleId,
+				"channelPattern" : row.channel_pattern,
+				"ruleType"       : row.rule_type,
+				"authWebhookUrl" : row.auth_webhook_url ?: ""
+			} );
+			return acc;
+		}, [] );
+	}
+
+	function addAuthRule(
+		required string accountId,
+		required string appId,
+		required string channelPattern,
+		required string ruleType,
+		required string authWebhookUrl
+	) {
+		if ( !appService.isValidAppId( appId ) || !getApp( accountId, appId ).count() ) {
+			return;
+		}
+
+		// (app_id, channel_pattern) is unique, so re-adding a pattern edits the
+		// existing rule instead of failing or creating an ambiguous second one.
+		queryExecute(
+			"INSERT INTO channel_auth_rules (id, app_id, channel_pattern, rule_type, auth_webhook_url)
+			 VALUES (UNHEX(REPLACE(UUID(),'-','')), UNHEX(:appId), :pattern, :ruleType, :webhookUrl)
+			 ON DUPLICATE KEY UPDATE
+			     rule_type        = VALUES(rule_type),
+			     auth_webhook_url = VALUES(auth_webhook_url)",
+			{
+				appId      : { value : appId, type : "varchar" },
+				pattern    : { value : trim( channelPattern ), type : "varchar" },
+				ruleType   : { value : ruleType == "presence" ? "presence" : "private", type : "varchar" },
+				webhookUrl : { value : trim( authWebhookUrl ), type : "varchar", null : !trim( authWebhookUrl ).len() }
+			},
+			{ datasource : variables.DSN }
+		);
+	}
+
+	function deleteAuthRule( required string accountId, required string ruleId ) {
+		if ( !appService.isValidAppId( ruleId ) ) {
+			return;
+		}
+		queryExecute(
+			"DELETE r FROM channel_auth_rules r
+			 JOIN apps a ON a.id = r.app_id
+			 WHERE r.id = UNHEX(:ruleId) AND a.account_id = UNHEX(:accountId)",
+			{
+				ruleId    : { value : ruleId, type : "varchar" },
+				accountId : { value : accountId, type : "varchar" }
+			},
+			{ datasource : variables.DSN }
+		);
+	}
+
+}

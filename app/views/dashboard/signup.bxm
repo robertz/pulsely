@@ -1,0 +1,42 @@
+<bx:output>
+<div class="auth-card">
+	<div class="auth-brand"><span class="brand-mark"></span>Pulsely</div>
+	<h1 class="auth-title">Start building for free</h1>
+	<p class="auth-sub">Your keys are ready the moment you sign up.</p>
+
+	<bx:if len( prc.signupError )>
+		<div class="alert">#encodeForHTML( prc.signupError )#</div>
+	</bx:if>
+
+	<form method="post" action="/dashboard/signup">
+
+		#csrfField()#
+		<label for="name">Name</label>
+		<input id="name" name="name" type="text" autocomplete="name"
+			value="#encodeForHTMLAttribute( prc.entered.name )#" required autofocus>
+
+		<label for="email">Work email</label>
+		<input id="email" name="email" type="email" autocomplete="username"
+			value="#encodeForHTMLAttribute( prc.entered.email )#" required>
+
+		<label for="password">Password</label>
+		<input id="password" name="password" type="password" autocomplete="new-password"
+			minlength="8" required>
+		<span class="hint">At least 8 characters.</span>
+
+		<label for="confirmPassword">Confirm password</label>
+		<input id="confirmPassword" name="confirmPassword" type="password"
+			autocomplete="new-password" minlength="8" required>
+
+		<button class="btn btn-primary btn-block btn-lg" type="submit">Create my free account</button>
+	</form>
+
+	<ul class="auth-perks">
+		<li><span class="check">&##10003;</span> No credit card required</li>
+		<li><span class="check">&##10003;</span> 200,000 messages a day on the free plan</li>
+		<li><span class="check">&##10003;</span> Publish your first event in minutes</li>
+	</ul>
+
+	<p class="auth-alt">Already have an account? <a href="/dashboard/login">Sign in</a></p>
+</div>
+</bx:output>

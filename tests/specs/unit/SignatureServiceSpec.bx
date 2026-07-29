@@ -1,0 +1,186 @@
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll() {
+		variables.sig = new app.models.SignatureService();
+		variables.SECRET = "test-secret";
+		variables.PATH = "/apps/22222222222222222222222222222222/events";
+		variables.BODY = '{"channel":"orders","event":"created","data":{"id":42}}';
+	}
+
+	private numeric function nowEpoch() {
+		return int( getTickCount() / 1000 );
+	}
+
+	private string function signNow( struct overrides = {} ) {
+		return variables.sig.sign(
+			overrides.secret ?: variables.SECRET,
+			overrides.method ?: "POST",
+			overrides.path   ?: variables.PATH,
+			overrides.ts     ?: nowEpoch(),
+			overrides.body   ?: variables.BODY
+		);
+	}
+
+	function run() {
+
+		describe( "buildSigningString()", () => {
+
+			it( "joins on real newlines, not the literal characters \n", () => {
+				var signing = variables.sig.buildSigningString( "POST", variables.PATH, "1700000000", variables.BODY );
+
+				expect( signing ).toInclude( char( 10 ) );
+				expect( signing ).notToInclude( "\" & "n" );
+				expect( signing.listLen( char( 10 ) ) ).toBe( 4 );
+			} );
+
+			it( "uppercases the method and hashes the body", () => {
+				var signing = variables.sig.buildSigningString( "post", variables.PATH, "1700000000", variables.BODY );
+				var parts = signing.listToArray( char( 10 ) );
+
+				expect( parts[ 1 ] ).toBe( "POST" );
+				expect( parts[ 2 ] ).toBe( variables.PATH );
+				expect( parts[ 3 ] ).toBe( "1700000000" );
+				expect( parts[ 4 ] ).toBe( lcase( hash( variables.BODY, "SHA-256" ) ) );
+			} );
+
+			it( "produces a different string for an empty body", () => {
+				var withBody = variables.sig.buildSigningString( "POST", variables.PATH, "1700000000", variables.BODY );
+				var without  = variables.sig.buildSigningString( "POST", variables.PATH, "1700000000", "" );
+
+				expect( withBody ).notToBe( without );
+			} );
+
+		} );
+
+		describe( "sign()", () => {
+
+			it( "is deterministic for identical inputs", () => {
+				expect( signNow( { ts : 1700000000 } ) ).toBe( signNow( { ts : 1700000000 } ) );
+			} );
+
+			it( "returns lowercase hex of the expected length", () => {
+				var signature = signNow( { ts : 1700000000 } );
+
+				expect( signature ).toMatch( "^[0-9a-f]{64}$" );
+			} );
+
+			it( "changes when the secret changes", () => {
+				expect( signNow( { ts : 1700000000 } ) )
+					.notToBe( signNow( { ts : 1700000000, secret : "other-secret" } ) );
+			} );
+
+		} );
+
+		describe( "verify()", () => {
+
+			it( "accepts a correctly signed current request", () => {
+				var ts = nowEpoch();
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, ts, variables.BODY, signNow( { ts : ts } ), 600
+				) ).toBeTrue();
+			} );
+
+			it( "rejects a tampered body", () => {
+				var ts = nowEpoch();
+				var signature = signNow( { ts : ts } );
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, ts,
+					'{"channel":"orders","event":"created","data":{"id":43}}', signature, 600
+				) ).toBeFalse();
+			} );
+
+			it( "rejects a signature replayed against another app's path", () => {
+				var ts = nowEpoch();
+				var signature = signNow( { ts : ts } );
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", "/apps/99999999999999999999999999999999/events",
+					ts, variables.BODY, signature, 600
+				) ).toBeFalse();
+			} );
+
+			it( "rejects the wrong secret", () => {
+				var ts = nowEpoch();
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, ts, variables.BODY,
+					signNow( { ts : ts, secret : "wrong" } ), 600
+				) ).toBeFalse();
+			} );
+
+			it( "rejects a timestamp older than the window", () => {
+				var stale = nowEpoch() - 4000;
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, stale, variables.BODY,
+					signNow( { ts : stale } ), 600
+				) ).toBeFalse();
+			} );
+
+			it( "rejects a timestamp too far in the future", () => {
+				var ahead = nowEpoch() + 4000;
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, ahead, variables.BODY,
+					signNow( { ts : ahead } ), 600
+				) ).toBeFalse();
+			} );
+
+			it( "accepts a timestamp at the edge of the window", () => {
+				var edge = nowEpoch() - 590;
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, edge, variables.BODY,
+					signNow( { ts : edge } ), 600
+				) ).toBeTrue();
+			} );
+
+			/**
+			 * The epoch must be derived in UTC. Deriving it from now() against a
+			 * local createDate() shifts the whole window by the server's offset,
+			 * which rejected every request in EDT.
+			 */
+			it( "treats the timestamp as UTC regardless of server timezone", () => {
+				var unixNow = nowEpoch();
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, unixNow, variables.BODY,
+					signNow( { ts : unixNow } ), 600
+				) ).toBeTrue( "a true UTC epoch timestamp must verify" );
+
+				// The original bug: epoch derived from a local createDate(). On any
+				// server west of UTC that is hours adrift, so a client sending it
+				// must fall outside the window rather than quietly pass.
+				var localEpoch = dateDiff( "s", createDate( 1970, 1, 1 ), now() );
+				var offset = abs( localEpoch - unixNow );
+
+				if ( offset > 600 ) {
+					expect( variables.sig.verify(
+						variables.SECRET, "POST", variables.PATH, localEpoch, variables.BODY,
+						signNow( { ts : localEpoch } ), 600
+					) ).toBeFalse( "a timezone-shifted epoch must not verify" );
+				}
+			} );
+
+			it( "rejects a malformed signature without throwing", () => {
+				var ts = nowEpoch();
+
+				expect( variables.sig.verify( variables.SECRET, "POST", variables.PATH, ts, variables.BODY, "", 600 ) ).toBeFalse();
+				expect( variables.sig.verify( variables.SECRET, "POST", variables.PATH, ts, variables.BODY, "abc", 600 ) ).toBeFalse();
+			} );
+
+			it( "is case-insensitive about the provided signature", () => {
+				var ts = nowEpoch();
+
+				expect( variables.sig.verify(
+					variables.SECRET, "POST", variables.PATH, ts, variables.BODY, ucase( signNow( { ts : ts } ) ), 600
+				) ).toBeTrue();
+			} );
+
+		} );
+
+	}
+
+}

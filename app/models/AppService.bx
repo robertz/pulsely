@@ -1,0 +1,106 @@
+/**
+ * Lookup and plan resolution for tenant apps.
+ *
+ * Instantiated directly by WebSocket.bx (which runs outside the ColdBox request
+ * lifecycle) and via WireBox by the ColdBox handlers, so it carries no injected
+ * dependencies of its own.
+ */
+class singleton {
+
+	variables.DSN = "pulsely";
+
+	function init() {
+		return this;
+	}
+
+	/**
+	 * Resolve an app by its public key, with the effective plan already merged in.
+	 * App-level plan_id overrides the owning account's plan_id.
+	 *
+	 * @return struct of app+plan columns, or an empty struct when not found/inactive
+	 */
+	struct function getActiveAppByKey( required string appKey ) {
+		var result = queryExecute(
+			"SELECT  LOWER(HEX(a.id))   AS appId,
+			         a.app_key          AS appKey,
+			         a.app_secret       AS appSecret,
+			         a.is_active        AS isActive,
+			         a.allows_client_events AS allowsClientEvents,
+			         p.name             AS planName,
+			         p.connection_limit AS connectionLimit,
+			         p.message_daily_limit      AS messageDailyLimit,
+			         p.allows_private_channels  AS allowsPrivateChannels,
+			         p.allows_presence_channels AS allowsPresenceChannels,
+			         p.allows_message_history   AS allowsMessageHistory,
+			         p.history_retention_hours  AS historyRetentionHours
+			 FROM    apps a
+			 JOIN    accounts acc ON acc.id = a.account_id
+			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
+			 WHERE   a.app_key = :appKey
+			   AND   a.is_active = 1",
+			{ appKey : { value : appKey, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+
+		return result.recordCount ? queryRowToStruct( result, 1 ) : {};
+	}
+
+	/**
+	 * Same shape as getActiveAppByKey(), keyed by the hex app id. Used by the
+	 * trigger API, whose URL carries the app id rather than the key.
+	 */
+	struct function getActiveAppById( required string appId ) {
+		if ( !isValidAppId( appId ) ) {
+			return {};
+		}
+
+		var result = queryExecute(
+			"SELECT  LOWER(HEX(a.id))   AS appId,
+			         a.app_key          AS appKey,
+			         a.app_secret       AS appSecret,
+			         a.is_active        AS isActive,
+			         a.allows_client_events AS allowsClientEvents,
+			         p.name             AS planName,
+			         p.connection_limit AS connectionLimit,
+			         p.message_daily_limit      AS messageDailyLimit,
+			         p.allows_private_channels  AS allowsPrivateChannels,
+			         p.allows_presence_channels AS allowsPresenceChannels,
+			         p.allows_message_history   AS allowsMessageHistory,
+			         p.history_retention_hours  AS historyRetentionHours
+			 FROM    apps a
+			 JOIN    accounts acc ON acc.id = a.account_id
+			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
+			 WHERE   a.id = UNHEX(:appId)
+			   AND   a.is_active = 1",
+			{ appId : { value : appId, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+
+		return result.recordCount ? queryRowToStruct( result, 1 ) : {};
+	}
+
+	/**
+	 * Guards every interpolation of an app id into a destination string or SQL
+	 * UNHEX(), so a malformed id can never widen a namespace check.
+	 */
+	boolean function isValidAppId( required string appId ) {
+		return reFind( "^[0-9a-fA-F]{32}$", appId ) > 0;
+	}
+
+	/**
+	 * The MySQL driver hands back TINYINT(1) as a Boolean, and val( true ) is 0,
+	 * so plan flags cannot be tested with val() the way the numeric limits are.
+	 */
+	boolean function flagEnabled( any value = false ) {
+		return isBoolean( value ) && value;
+	}
+
+	private struct function queryRowToStruct( required query qry, required numeric rowNum ) {
+		var row = {};
+		for ( var col in qry.columnList.listToArray() ) {
+			row[ col ] = qry[ col ][ rowNum ];
+		}
+		return row;
+	}
+
+}

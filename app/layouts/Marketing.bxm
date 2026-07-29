@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Pulsely — realtime pub/sub for your app, without the plumbing</title>
+	<meta name="description" content="Add realtime channels to any app in minutes. Publish from your backend with one signed HTTP call, subscribe in the browser with a few lines of JavaScript. Start free.">
+	<link rel="stylesheet" href="/assets/css/base.css">
+	<link rel="stylesheet" href="/assets/css/marketing.css">
+</head>
+<body class="no-js">
+<script>document.body.classList.remove( 'no-js' );</script>
+
+<header class="site-header">
+	<div class="wrap">
+		<a class="brand" href="/"><span class="brand-mark"></span>Pulsely</a>
+
+		<nav class="site-nav">
+			<a class="nav-link" href="/#features">Features</a>
+			<a class="nav-link" href="/#how">How it works</a>
+			<a class="nav-link" href="/#pricing">Pricing</a>
+
+			<div class="header-cta">
+				<bx:output>
+					<bx:if structKeyExists( prc, "account" ) and not prc.account.isEmpty()>
+						<a class="btn btn-primary" href="/dashboard">Go to dashboard</a>
+					<bx:else>
+						<a class="btn btn-ghost btn-sm" href="/dashboard/login">Sign in</a>
+						<a class="btn btn-primary" href="/dashboard/signup">Start free</a>
+					</bx:if>
+				</bx:output>
+			</div>
+		</nav>
+	</div>
+</header>
+
+<main>
+	<bx:output>#renderView()#</bx:output>
+</main>
+
+<footer class="site-footer">
+	<div class="wrap">
+		<p>&copy; <bx:output>#year( now() )#</bx:output> Pulsely</p>
+		<div class="footer-links">
+			<a href="/#features">Features</a>
+			<a href="/#pricing">Pricing</a>
+			<a href="/dashboard/login">Sign in</a>
+			<a href="/dashboard/signup">Start free</a>
+		</div>
+	</div>
+</footer>
+
+<script src="/assets/js/marketing-tabs.js"></script>
+</body>
+</html>

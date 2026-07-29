@@ -1,0 +1,208 @@
+class extends="testbox.system.BaseSpec" {
+
+	variables.DSN = "pulsely";
+	variables.TEST_ACCOUNT = "aa000000000000000000000000000001";
+	variables.TEST_APP     = "aa000000000000000000000000000002";
+
+	function beforeAll() {
+		variables.metering = new app.models.MeteringService();
+
+		// A tenant of our own, so counters here never disturb the seeded dev data.
+		queryExecute(
+			"INSERT INTO accounts (id, email, name, password_hash, plan_id)
+			 SELECT UNHEX(:acct), 'metering-spec@test.local', 'Metering Spec', 'x', id
+			 FROM plans WHERE name = 'Business'
+			 ON DUPLICATE KEY UPDATE name = VALUES(name)",
+			{ acct : variables.TEST_ACCOUNT },
+			{ datasource : variables.DSN }
+		);
+		queryExecute(
+			"INSERT INTO apps (id, account_id, name, app_key, app_secret)
+			 VALUES (UNHEX(:app), UNHEX(:acct), 'Metering Spec App', 'meteringspeckey', 'meteringspecsecret')
+			 ON DUPLICATE KEY UPDATE name = VALUES(name)",
+			{ app : variables.TEST_APP, acct : variables.TEST_ACCOUNT },
+			{ datasource : variables.DSN }
+		);
+	}
+
+	function afterAll() {
+		queryExecute( "DELETE FROM usage_daily WHERE app_id = UNHEX(:app)", { app : variables.TEST_APP }, { datasource : variables.DSN } );
+		queryExecute( "DELETE FROM apps WHERE id = UNHEX(:app)", { app : variables.TEST_APP }, { datasource : variables.DSN } );
+		queryExecute( "DELETE FROM accounts WHERE id = UNHEX(:acct)", { acct : variables.TEST_ACCOUNT }, { datasource : variables.DSN } );
+	}
+
+	private function reset() {
+		queryExecute( "DELETE FROM usage_daily WHERE app_id = UNHEX(:app)", { app : variables.TEST_APP }, { datasource : variables.DSN } );
+		application.pulselyConnCounts = {};
+	}
+
+	function run() {
+
+		describe( "message counters", () => {
+
+			beforeEach( () => reset() );
+
+			it( "inserts a row on the first message of the day", () => {
+				expect( variables.metering.getMessagesSentToday( variables.TEST_APP ) ).toBe( 0 );
+
+				variables.metering.recordMessages( variables.TEST_APP );
+
+				expect( variables.metering.getMessagesSentToday( variables.TEST_APP ) ).toBe( 1 );
+			} );
+
+			it( "accumulates onto the existing row rather than inserting again", () => {
+				variables.metering.recordMessages( variables.TEST_APP );
+				variables.metering.recordMessages( variables.TEST_APP );
+				variables.metering.recordMessages( variables.TEST_APP );
+
+				expect( variables.metering.getMessagesSentToday( variables.TEST_APP ) ).toBe( 3 );
+
+				var rows = queryExecute(
+					"SELECT COUNT(*) AS c FROM usage_daily WHERE app_id = UNHEX(:app) AND usage_date = CURRENT_DATE()",
+					{ app : variables.TEST_APP },
+					{ datasource : variables.DSN }
+				);
+				expect( rows.c[ 1 ] ).toBe( 1, "the unique key on (app_id, usage_date) must keep this to one row" );
+			} );
+
+			it( "records a batch in one call", () => {
+				variables.metering.recordMessages( variables.TEST_APP, 25 );
+
+				expect( variables.metering.getMessagesSentToday( variables.TEST_APP ) ).toBe( 25 );
+			} );
+
+			it( "reports zero for an app with no usage today", () => {
+				expect( variables.metering.getMessagesSentToday( "99999999999999999999999999999999" ) ).toBe( 0 );
+			} );
+
+		} );
+
+		describe( "connection counters", () => {
+
+			beforeEach( () => reset() );
+
+			it( "counts up and back down", () => {
+				expect( variables.metering.getCurrentConnections( variables.TEST_APP ) ).toBe( 0 );
+
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( variables.TEST_APP );
+				expect( variables.metering.getCurrentConnections( variables.TEST_APP ) ).toBe( 2 );
+
+				variables.metering.connectionClosed( variables.TEST_APP );
+				expect( variables.metering.getCurrentConnections( variables.TEST_APP ) ).toBe( 1 );
+			} );
+
+			/**
+			 * onClose() can fire for a socket that never authenticated, so an
+			 * unmatched close must not drive the live count negative — that would
+			 * let an app exceed its connection limit forever.
+			 */
+			it( "never goes negative on an unmatched close", () => {
+				variables.metering.connectionClosed( variables.TEST_APP );
+				variables.metering.connectionClosed( variables.TEST_APP );
+
+				expect( variables.metering.getCurrentConnections( variables.TEST_APP ) ).toBe( 0 );
+			} );
+
+			it( "keeps counts separate per app", () => {
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( "bb000000000000000000000000000003" );
+
+				expect( variables.metering.getCurrentConnections( variables.TEST_APP ) ).toBe( 1 );
+				expect( variables.metering.getCurrentConnections( "bb000000000000000000000000000003" ) ).toBe( 1 );
+			} );
+
+		} );
+
+		describe( "flushPeakConnections()", () => {
+
+			beforeEach( () => reset() );
+
+			it( "writes the high-water mark, not the live count", () => {
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionClosed( variables.TEST_APP );
+
+				expect( variables.metering.getCurrentConnections( variables.TEST_APP ) ).toBe( 2 );
+
+				variables.metering.flushPeakConnections();
+
+				var rows = queryExecute(
+					"SELECT peak_connections FROM usage_daily WHERE app_id = UNHEX(:app) AND usage_date = CURRENT_DATE()",
+					{ app : variables.TEST_APP },
+					{ datasource : variables.DSN }
+				);
+				expect( rows.peak_connections[ 1 ] ).toBe( 3 );
+			} );
+
+			it( "never lowers an existing peak", () => {
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.flushPeakConnections();
+
+				variables.metering.connectionClosed( variables.TEST_APP );
+				variables.metering.connectionClosed( variables.TEST_APP );
+				variables.metering.connectionClosed( variables.TEST_APP );
+				variables.metering.flushPeakConnections();
+
+				var rows = queryExecute(
+					"SELECT peak_connections FROM usage_daily WHERE app_id = UNHEX(:app) AND usage_date = CURRENT_DATE()",
+					{ app : variables.TEST_APP },
+					{ datasource : variables.DSN }
+				);
+				expect( rows.peak_connections[ 1 ] ).toBe( 3, "GREATEST() must protect the day's peak" );
+			} );
+
+			it( "rebases the next window on the live count", () => {
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.flushPeakConnections();
+
+				// Both still connected, so the next window starts at 2, not 0.
+				variables.metering.flushPeakConnections();
+
+				var rows = queryExecute(
+					"SELECT peak_connections FROM usage_daily WHERE app_id = UNHEX(:app) AND usage_date = CURRENT_DATE()",
+					{ app : variables.TEST_APP },
+					{ datasource : variables.DSN }
+				);
+				expect( rows.peak_connections[ 1 ] ).toBe( 2 );
+			} );
+
+			/**
+			 * The flush is a scheduled sweep over every app in memory. One id with
+			 * no apps row must not take the whole pass down with it.
+			 */
+			it( "still records real apps when an unknown app id is in the store", () => {
+				variables.metering.connectionOpened( variables.TEST_APP );
+				variables.metering.connectionOpened( "bb000000000000000000000000000003" );
+
+				variables.metering.flushPeakConnections();
+
+				var rows = queryExecute(
+					"SELECT peak_connections FROM usage_daily WHERE app_id = UNHEX(:app) AND usage_date = CURRENT_DATE()",
+					{ app : variables.TEST_APP },
+					{ datasource : variables.DSN }
+				);
+				expect( rows.recordCount ).toBe( 1, "the good app must still be flushed" );
+				expect( rows.peak_connections[ 1 ] ).toBe( 1 );
+			} );
+
+			it( "writes nothing for an app that never had a connection", () => {
+				variables.metering.flushPeakConnections();
+
+				var rows = queryExecute(
+					"SELECT COUNT(*) AS c FROM usage_daily WHERE app_id = UNHEX(:app)",
+					{ app : variables.TEST_APP },
+					{ datasource : variables.DSN }
+				);
+				expect( rows.c[ 1 ] ).toBe( 0 );
+			} );
+
+		} );
+
+	}
+
+}

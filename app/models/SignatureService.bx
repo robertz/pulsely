@@ -1,0 +1,75 @@
+/**
+ * HMAC request signing for the server-side trigger API.
+ *
+ * Signing string is `POST\n{path}\n{timestamp}\n{sha256(body)}`. Binding the path
+ * and the body hash stops a captured signature being replayed against a different
+ * app or with a swapped payload; the timestamp bounds the replay window.
+ */
+class singleton {
+
+	function init() {
+		return this;
+	}
+
+	string function buildSigningString(
+		required string httpMethod,
+		required string path,
+		required string timestamp,
+		required string body
+	) {
+		// char(10), not "\n" — CFML/BoxLang double-quoted strings do not process
+		// backslash escapes, and this string has to match a real newline joined
+		// by customer SDKs in other languages.
+		var LF = char( 10 );
+		return ucase( httpMethod ) & LF
+			& path & LF
+			& timestamp & LF
+			& lcase( hash( body, "SHA-256" ) );
+	}
+
+	string function sign(
+		required string appSecret,
+		required string httpMethod,
+		required string path,
+		required string timestamp,
+		required string body
+	) {
+		return lcase( hmac(
+			buildSigningString( httpMethod, path, timestamp, body ),
+			appSecret,
+			"HMACSHA256"
+		) );
+	}
+
+	boolean function verify(
+		required string appSecret,
+		required string httpMethod,
+		required string path,
+		required string timestamp,
+		required string body,
+		required string providedSignature,
+		required numeric windowSeconds
+	) {
+		// getTickCount() is epoch milliseconds in UTC. Deriving this from now()
+		// instead would silently offset the whole window by the server's timezone.
+		var nowEpoch = int( getTickCount() / 1000 );
+		if ( abs( nowEpoch - val( timestamp ) ) > windowSeconds ) {
+			return false;
+		}
+
+		var expected = sign( appSecret, httpMethod, path, timestamp, body );
+		return constantTimeEquals( expected, lcase( trim( providedSignature ) ) );
+	}
+
+	private boolean function constantTimeEquals( required string a, required string b ) {
+		if ( a.len() != b.len() ) {
+			return false;
+		}
+		var diff = 0;
+		for ( var i = 1; i <= a.len(); i++ ) {
+			diff = bitOr( diff, bitXor( ascii( a.mid( i, 1 ) ), ascii( b.mid( i, 1 ) ) ) );
+		}
+		return diff == 0;
+	}
+
+}

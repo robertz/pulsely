@@ -1,0 +1,24 @@
+class {
+
+	function configure() {
+
+		route( "/apps/:appId/events" )
+			.withAction( { POST : "trigger" } )
+			.toHandler( "Events" );
+
+		route( "/dashboard/app/:appId" ).to( "Dashboard.app" );
+		route( "/dashboard/login" ).withAction( { GET : "login", POST : "doLogin" } ).toHandler( "Dashboard" );
+		route( "/dashboard/signup" ).withAction( { GET : "signup", POST : "doSignup" } ).toHandler( "Dashboard" );
+		route( "/dashboard/logout" ).withAction( { POST : "logout" } ).toHandler( "Dashboard" );
+		route( "/dashboard/:action?" ).toHandler( "Dashboard" );
+
+		route( "/admin/account/:accountId" ).to( "Admin.account" );
+		route( "/admin/:action?" ).toHandler( "Admin" );
+
+		route( "/" ).to( "Home.index" );
+		route( "/pricing" ).to( "Home.index" );
+
+		route( ":handler/:action?" ).end();
+	}
+
+}

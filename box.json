@@ -1,0 +1,47 @@
+{
+    "name":"pulsely",
+    "version":"0.1.0",
+    "author":"You",
+    "location":"forgeboxStorage",
+    "slug":"pulsely",
+    "createPackageDirectory":false,
+    "type":"mvc",
+    "language":"boxlang",
+    "keywords":"boxlang,realtime,pubsub,websocket,stomp",
+    "shortDescription":"Multi-tenant realtime pub/sub SaaS on BoxLang + ColdBox + SocketBox STOMP",
+    "ignore":[],
+    "dependencies":{
+        "coldbox":"^8.0.0",
+        "socketbox":"^2.1.0",
+        "cbcsrf":"^3.2.0+1",
+        "bx-mysql":"*",
+        "bx-compat-cfml":"*",
+        "bx-esapi":"*"
+    },
+    "devDependencies":{
+        "testbox":"*",
+        "route-visualizer":"*",
+        "commandbox-boxlang":"*"
+    },
+    "installPathConventions":{
+        "modules":"lib/modules"
+    },
+    "installPaths":{
+        "coldbox":"lib/coldbox/",
+        "testbox":"lib/testbox/",
+        "route-visualizer":"lib/modules/route-visualizer/",
+        "socketbox":"lib/modules/socketbox/",
+        "cbcsrf":"lib/modules/cbcsrf/",
+        "bx-mysql":"boxlang_modules/bx-mysql/",
+        "bx-compat-cfml":"boxlang_modules/bx-compat-cfml/",
+        "bx-esapi":"boxlang_modules/bx-esapi/"
+    },
+    "scripts":{
+        "format":"!boxlang format --source app/,tests/specs/,*.bx",
+        "format:check":"!boxlang format --check --source app/,tests/specs/,*.bx"
+    },
+    "testbox":{
+        "runner":"/tests/runner.bxm"
+    },
+    "description":"Multi-tenant realtime pub/sub SaaS on BoxLang + ColdBox + SocketBox STOMP"
+}

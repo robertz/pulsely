@@ -1,0 +1,60 @@
+/**
+ * Public plan catalogue for the pricing section.
+ *
+ * The marketing page reads real rows so published prices and limits cannot drift
+ * away from what the broker actually enforces.
+ */
+class singleton {
+
+	variables.DSN = "pulsely";
+
+	function init() {
+		return this;
+	}
+
+	array function getPublicPlans() {
+		var rows = queryExecute(
+			"SELECT name, connection_limit, message_daily_limit, price_cents,
+			        allows_private_channels, allows_presence_channels,
+			        allows_message_history, history_retention_hours
+			 FROM   plans
+			 WHERE  is_active = 1
+			 ORDER BY price_cents ASC, created_at ASC",
+			{},
+			{ datasource : variables.DSN }
+		);
+
+		var plans = [];
+		var index = 0;
+
+		for ( var row in rows ) {
+			index++;
+			plans.append( {
+				"name"              : row.name,
+				"priceCents"        : row.price_cents,
+				"isFree"            : row.price_cents == 0,
+				// The currency symbol is presentation and lives in the template, so
+				// the label stays a plain number rather than an escaped entity.
+				"priceLabel"        : row.price_cents == 0 ? "Free" : numberFormat( row.price_cents / 100, "9" ),
+				"connectionLimit"   : row.connection_limit,
+				"messageDailyLimit" : row.message_daily_limit,
+				"privateChannels"   : flag( row.allows_private_channels ),
+				"presenceChannels"  : flag( row.allows_presence_channels ),
+				"messageHistory"    : flag( row.allows_message_history ),
+				"retentionHours"    : row.history_retention_hours,
+				// The middle tier carries the emphasis; with two tiers the paid one does.
+				"featured"          : rows.recordCount >= 3 ? index == 2 : index == rows.recordCount
+			} );
+		}
+
+		return plans;
+	}
+
+	/**
+	 * TINYINT(1) arrives from the driver as a Boolean, where val() would read 0.
+	 */
+	private boolean function flag( any value = false ) {
+		return isBoolean( value ) && value;
+	}
+
+}

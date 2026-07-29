@@ -1,0 +1,140 @@
+/**
+ * System administration console.
+ *
+ * Admin status is re-read from the database on every request rather than trusted
+ * from the session, so revoking it takes effect immediately instead of whenever
+ * the session happens to expire.
+ */
+class {
+
+	property name="adminService"    inject="AdminService";
+	property name="meteringService" inject="MeteringService";
+
+	function preHandler( event, rc, prc, action, eventArguments ) {
+		prc.account = session.account ?: {};
+
+		// Same fail-closed CSRF rule as the dashboard: any non-GET must carry a token.
+		if ( !listFindNoCase( "GET,HEAD,OPTIONS", event.getHTTPMethod() ) ) {
+			if ( !csrfVerify( rc.csrf ?: "" ) ) {
+				relocate(
+					url         = "/dashboard/login",
+					queryString = "error=" & encodeForURL( "Your session expired. Please try again." )
+				);
+				return;
+			}
+		}
+
+		if ( prc.account.isEmpty() ) {
+			relocate( "dashboard/login" );
+			return;
+		}
+
+		// The authoritative check. Anyone signed in but not an administrator is
+		// sent to their own dashboard, not shown an error that confirms this exists.
+		if ( !adminService.isAdmin( prc.account.accountId ) ) {
+			relocate( "dashboard" );
+			return;
+		}
+
+		prc.isAdmin = true;
+	}
+
+	function index( event, rc, prc ) {
+		prc.accounts = adminService.listAccounts();
+		prc.plans    = adminService.listPlans();
+		prc.notice   = rc.notice ?: "";
+		prc.adminError = rc.error ?: "";
+		event.setView( "admin/index" );
+	}
+
+	function account( event, rc, prc ) {
+		var accountId = rc.accountId ?: "";
+		var match = adminService.listAccounts().filter( ( candidate ) => candidate.accountId == accountId );
+
+		if ( !match.len() ) {
+			relocate( "admin" );
+			return;
+		}
+
+		prc.viewing = match[ 1 ];
+		prc.apps    = adminService.listApps( accountId );
+		prc.plans   = adminService.listPlans();
+		event.setView( "admin/account" );
+	}
+
+	/**
+	 * Cross-tenant monitor: every app on the installation with its live connection
+	 * count. Rendered with a fresh snapshot so the page shows real numbers before
+	 * admin-monitor.js takes over and starts polling.
+	 */
+	function monitor( event, rc, prc ) {
+		prc.totals = adminService.platformTotals();
+		prc.apps   = withLiveConnections( adminService.listAllApps() );
+		prc.totals.liveConnections = meteringService.getTotalConnections();
+		event.setView( "admin/monitor" );
+	}
+
+	/**
+	 * JSON snapshot polled by admin-monitor.js. GET and read-only, so it carries
+	 * no CSRF token — the same reasoning as any other report view in this handler.
+	 */
+	function monitorData( event, rc, prc ) {
+		var body = {
+			"totals" : adminService.platformTotals(),
+			"apps"   : withLiveConnections( adminService.listAllApps() )
+		};
+		body.totals.liveConnections = meteringService.getTotalConnections();
+
+		event.getResponse().setStatusCode( 200 ).setData( body );
+		return event.renderData( type = "json", data = body, statusCode = 200 );
+	}
+
+	/**
+	 * Merges the broker's in-memory connection counts into a DB-sourced app list.
+	 * One snapshot read rather than one lookup per app.
+	 */
+	private array function withLiveConnections( required array apps ) {
+		var live = meteringService.snapshotConnections();
+		return apps.map( ( app ) => {
+			var merged = duplicate( app );
+			merged.liveConnections = live.keyExists( app.appId ) ? live[ app.appId ] : 0;
+			return merged;
+		} );
+	}
+
+	function setPlan( event, rc, prc ) {
+		var result = adminService.setPlan( prc.account.accountId, rc.accountId ?: "", rc.planId ?: "" );
+		back( result, "Plan updated." );
+	}
+
+	function setActive( event, rc, prc ) {
+		var result = adminService.setActive(
+			prc.account.accountId,
+			rc.accountId ?: "",
+			!( ( rc.active ?: "0" ) == "1" )
+		);
+		back( result, "Account updated." );
+	}
+
+	function setAdmin( event, rc, prc ) {
+		var result = adminService.setAdmin(
+			prc.account.accountId,
+			rc.accountId ?: "",
+			!( ( rc.admin ?: "0" ) == "1" )
+		);
+		back( result, "Administrator access updated." );
+	}
+
+	/**
+	 * Refusals carry their reason back to the console rather than failing silently.
+	 */
+	private function back( required struct result, required string successMessage ) {
+		relocate(
+			url         = "/admin",
+			queryString = result.ok
+				? "notice=" & encodeForURL( successMessage )
+				: "error=" & encodeForURL( result.error )
+		);
+	}
+
+}

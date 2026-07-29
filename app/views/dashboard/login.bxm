@@ -1,0 +1,25 @@
+<bx:output>
+<div class="auth-card">
+	<div class="auth-brand"><span class="brand-mark"></span>Pulsely</div>
+	<h1 class="auth-title">Welcome back</h1>
+	<p class="auth-sub">Sign in to your dashboard.</p>
+
+	<bx:if len( prc.loginError )>
+		<div class="alert">#encodeForHTML( prc.loginError )#</div>
+	</bx:if>
+
+	<form method="post" action="/dashboard/login">
+
+		#csrfField()#
+		<label for="email">Email</label>
+		<input id="email" name="email" type="email" autocomplete="username" required autofocus>
+
+		<label for="password">Password</label>
+		<input id="password" name="password" type="password" autocomplete="current-password" required>
+
+		<button class="btn btn-primary btn-block btn-lg" type="submit">Sign in</button>
+	</form>
+
+	<p class="auth-alt">New to Pulsely? <a href="/dashboard/signup">Create a free account</a></p>
+</div>
+</bx:output>

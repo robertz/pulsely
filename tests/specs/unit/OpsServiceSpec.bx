@@ -1,0 +1,82 @@
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll() {
+		variables.ops = new app.models.OpsService();
+		variables.APP_ID = "22222222222222222222222222222222";
+		variables.APP_KEY = "devkey123";
+		variables.APP_SECRET = "devsecret456";
+	}
+
+	function run() {
+
+		describe( "the reserved ops namespace", () => {
+
+			it( "uses a $-prefixed channel that customers cannot publish to", () => {
+				expect( variables.ops.opsChannel() ).toBe( '$ops' );
+				expect( variables.ops.opsChannel().startsWith( '$' ) ).toBeTrue();
+			} );
+
+			it( "builds the destination as {appId}.{channel}", () => {
+				expect( variables.ops.opsDestination( variables.APP_ID ) ).toBe( variables.APP_ID & '.$ops' );
+			} );
+
+		} );
+
+		describe( "mintOpsToken()", () => {
+
+			it( "emits the {expires}.{userId}.{hmac} format authenticate() parses", () => {
+				var parts = variables.ops.mintOpsToken( variables.APP_KEY, variables.APP_SECRET ).listToArray( "." );
+
+				expect( parts.len() ).toBe( 3 );
+				expect( parts[ 1 ] ).toMatch( "^[0-9]+$" );
+				expect( parts[ 2 ] ).toBe( '$ops' );
+				expect( parts[ 3 ] ).toMatch( "^[0-9a-f]{64}$" );
+			} );
+
+			it( "expires in the future", () => {
+				var expires = val( variables.ops.mintOpsToken( variables.APP_KEY, variables.APP_SECRET ).listFirst( "." ) );
+
+				expect( expires ).toBeGT( int( getTickCount() / 1000 ) );
+			} );
+
+			it( "signs over app key, expiry and user so the broker can verify it", () => {
+				var token = variables.ops.mintOpsToken( variables.APP_KEY, variables.APP_SECRET );
+				var parts = token.listToArray( "." );
+				var expected = lcase( hmac(
+					"#variables.APP_KEY#:#parts[ 1 ]#:#parts[ 2 ]#",
+					variables.APP_SECRET,
+					"HMACSHA256"
+				) );
+
+				expect( parts[ 3 ] ).toBe( expected );
+			} );
+
+			/**
+			 * The token is the only thing gating the dashboard's usage feed, so a
+			 * different app's secret must not produce a usable signature.
+			 */
+			it( "is not forgeable with another app's secret", () => {
+				var token = variables.ops.mintOpsToken( variables.APP_KEY, variables.APP_SECRET );
+				var forged = variables.ops.mintOpsToken( variables.APP_KEY, "someone-elses-secret" );
+
+				expect( token.listGetAt( 3, "." ) ).notToBe( forged.listGetAt( 3, "." ) );
+			} );
+
+		} );
+
+		describe( "envelope()", () => {
+
+			it( "matches the shape the SDK dispatches on", () => {
+				var wrapped = variables.ops.envelope( "message.published", { "channel" : "orders" } );
+
+				expect( wrapped ).toHaveKey( "event" );
+				expect( wrapped ).toHaveKey( "data" );
+				expect( wrapped.event ).toBe( "message.published" );
+				expect( wrapped.data.channel ).toBe( "orders" );
+			} );
+
+		} );
+
+	}
+
+}

@@ -1,0 +1,10 @@
+{
+    "background":true,
+    "name":"pulsely2",
+    "web":{
+        "http":{
+            "port":"8086"
+        }
+    },
+    "webroot":"./public"
+}

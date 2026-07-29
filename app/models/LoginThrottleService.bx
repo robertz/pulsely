@@ -1,0 +1,130 @@
+/**
+ * Rate limits failed sign-in attempts.
+ *
+ * Attempts are keyed on the (client IP, email) pair rather than the email alone.
+ * Keying on email only would let anyone lock a victim out of their own account by
+ * failing five logins on their behalf; keying on IP only would let one attacker
+ * spread attempts across many accounts. The pair stops sustained guessing at a
+ * single account from a single source, which is the common case.
+ *
+ * A distributed attack from many addresses is NOT stopped by this — that needs a
+ * network-level control. State lives in the application scope, matching the
+ * single-node assumption the rest of the broker is built on.
+ */
+class singleton {
+
+	variables.STORE_KEY   = "pulselyLoginAttempts";
+	variables.MAX_FAILURES = 5;
+	variables.WINDOW_SECONDS = 900;
+	variables.LOCKOUT_SECONDS = 900;
+
+	function init() {
+		ensureStore();
+		return this;
+	}
+
+	private string function keyFor( required string ip, required string email ) {
+		return lcase( trim( ip ) ) & "|" & lcase( trim( email ) );
+	}
+
+	private numeric function nowEpoch() {
+		return int( getTickCount() / 1000 );
+	}
+
+	/**
+	 * @return { locked : boolean, retryAfterSeconds : numeric }
+	 */
+	struct function check( required string ip, required string email ) {
+		var store = ensureStore();
+		var storeKey = keyFor( ip, email );
+
+		if ( !store.keyExists( storeKey ) ) {
+			return { locked : false, retryAfterSeconds : 0 };
+		}
+
+		var record = store[ storeKey ];
+
+		if ( record.lockedUntil > nowEpoch() ) {
+			return { locked : true, retryAfterSeconds : record.lockedUntil - nowEpoch() };
+		}
+
+		// Lockout served, or the window lapsed with no further failures.
+		if ( record.lockedUntil > 0 || record.lastFailureAt < nowEpoch() - variables.WINDOW_SECONDS ) {
+			store.delete( storeKey );
+		}
+
+		return { locked : false, retryAfterSeconds : 0 };
+	}
+
+	function recordFailure( required string ip, required string email ) {
+		var store = ensureStore();
+		var storeKey = keyFor( ip, email );
+
+		lock name="pulselyLogin-#hash( storeKey )#" type="exclusive" timeout="5" {
+			var record = store[ storeKey ] ?: { failures : 0, lastFailureAt : 0, lockedUntil : 0 };
+
+			// Failures older than the window do not count toward a lockout.
+			if ( record.lastFailureAt < nowEpoch() - variables.WINDOW_SECONDS ) {
+				record.failures = 0;
+			}
+
+			record.failures++;
+			record.lastFailureAt = nowEpoch();
+
+			if ( record.failures >= variables.MAX_FAILURES ) {
+				record.lockedUntil = nowEpoch() + variables.LOCKOUT_SECONDS;
+			}
+
+			store[ storeKey ] = record;
+		}
+	}
+
+	function recordSuccess( required string ip, required string email ) {
+		ensureStore().delete( keyFor( ip, email ) );
+	}
+
+	numeric function failureCount( required string ip, required string email ) {
+		var record = ensureStore()[ keyFor( ip, email ) ] ?: {};
+		return record.failures ?: 0;
+	}
+
+	/**
+	 * Drops records that are past their lockout and outside the failure window, so
+	 * the store does not grow without bound. Called by a scheduled task.
+	 */
+	numeric function purgeExpired() {
+		var store = ensureStore();
+		var cutoff = nowEpoch() - variables.WINDOW_SECONDS;
+		var removed = 0;
+
+		for ( var storeKey in store.keyArray() ) {
+			var record = store[ storeKey ] ?: {};
+			if ( ( record.lockedUntil ?: 0 ) <= nowEpoch() && ( record.lastFailureAt ?: 0 ) < cutoff ) {
+				store.delete( storeKey );
+				removed++;
+			}
+		}
+
+		return removed;
+	}
+
+	numeric function maxFailures() {
+		return variables.MAX_FAILURES;
+	}
+
+	numeric function lockoutSeconds() {
+		return variables.LOCKOUT_SECONDS;
+	}
+
+	private struct function ensureStore() {
+		if ( !application.keyExists( variables.STORE_KEY ) ) {
+			lock name="pulselyLoginStoreInit" type="exclusive" timeout="10" {
+				if ( !application.keyExists( variables.STORE_KEY ) ) {
+					application[ variables.STORE_KEY ] = {};
+				}
+			}
+		}
+		return application[ variables.STORE_KEY ];
+	}
+
+}

@@ -1,0 +1,147 @@
+/**
+ * Usage counters for billing and the dashboard graphs.
+ *
+ * Message counts are written through on each trigger-API send. Connection counts
+ * are kept in the application scope and flushed as a high-water mark by a
+ * scheduled task, so connect/disconnect churn never touches the database.
+ */
+class singleton {
+
+	variables.DSN = "pulsely";
+	variables.CONN_KEY = "pulselyConnCounts";
+
+	function init() {
+		ensureStore();
+		return this;
+	}
+
+	/* ------------------------------------------------------------ messages */
+
+	function recordMessages( required string appId, numeric count = 1 ) {
+		queryExecute(
+			"INSERT INTO usage_daily (id, app_id, usage_date, messages_sent)
+			 VALUES (UNHEX(REPLACE(UUID(), '-', '')), UNHEX(:appId), CURRENT_DATE(), :count)
+			 ON DUPLICATE KEY UPDATE messages_sent = messages_sent + :count",
+			{
+				appId : { value : appId, type : "varchar" },
+				count : { value : count, type : "bigint" }
+			},
+			{ datasource : variables.DSN }
+		);
+	}
+
+	numeric function getMessagesSentToday( required string appId ) {
+		var result = queryExecute(
+			"SELECT messages_sent FROM usage_daily
+			 WHERE app_id = UNHEX(:appId) AND usage_date = CURRENT_DATE()",
+			{ appId : { value : appId, type : "varchar" } },
+			{ datasource : variables.DSN }
+		);
+		return result.recordCount ? result.messages_sent[ 1 ] : 0;
+	}
+
+	/* --------------------------------------------------------- connections */
+
+	numeric function connectionOpened( required string appId ) {
+		var store = ensureStore();
+		lock name="pulselyConn-#appId#" type="exclusive" timeout="5" {
+			store[ appId ] = ( store[ appId ] ?: { current : 0, peak : 0 } );
+			store[ appId ].current++;
+			store[ appId ].peak = max( store[ appId ].peak, store[ appId ].current );
+			return store[ appId ].current;
+		}
+	}
+
+	numeric function connectionClosed( required string appId ) {
+		var store = ensureStore();
+		lock name="pulselyConn-#appId#" type="exclusive" timeout="5" {
+			if ( !store.keyExists( appId ) ) {
+				return 0;
+			}
+			store[ appId ].current = max( 0, store[ appId ].current - 1 );
+			return store[ appId ].current;
+		}
+	}
+
+	numeric function getCurrentConnections( required string appId ) {
+		var store = ensureStore();
+		return store.keyExists( appId ) ? store[ appId ].current : 0;
+	}
+
+	/**
+	 * appId -> current connection count, for every app with at least one open
+	 * connection. One read of the live store instead of a lookup per app, for
+	 * callers (the admin monitor) merging this against a full app list.
+	 */
+	struct function snapshotConnections() {
+		var store = ensureStore();
+		var snapshot = {};
+		for ( var appId in store.keyArray() ) {
+			snapshot[ appId ] = store[ appId ].current;
+		}
+		return snapshot;
+	}
+
+	/**
+	 * Sum of live connections across every app — the monitor's header tile.
+	 */
+	numeric function getTotalConnections() {
+		var store = ensureStore();
+		var total = 0;
+		for ( var appId in store.keyArray() ) {
+			total += store[ appId ].current;
+		}
+		return total;
+	}
+
+	/**
+	 * Push the in-memory peaks to usage_daily and reset each peak to the current
+	 * live count, so the next window measures its own high-water mark rather than
+	 * re-reporting an old one.
+	 */
+	function flushPeakConnections() {
+		var store = ensureStore();
+
+		for ( var appId in store.keyArray() ) {
+			var peak = 0;
+			lock name="pulselyConn-#appId#" type="exclusive" timeout="5" {
+				peak = store[ appId ].peak;
+				store[ appId ].peak = store[ appId ].current;
+			}
+
+			if ( peak <= 0 ) {
+				continue;
+			}
+
+			// An app deleted while connections were still open leaves an id in the
+			// store with no apps row. Isolate it, or its foreign-key failure would
+			// abort the flush for every remaining app in the same pass.
+			try {
+				queryExecute(
+					"INSERT INTO usage_daily (id, app_id, usage_date, peak_connections)
+					 VALUES (UNHEX(REPLACE(UUID(), '-', '')), UNHEX(:appId), CURRENT_DATE(), :peak)
+					 ON DUPLICATE KEY UPDATE peak_connections = GREATEST(peak_connections, :peak)",
+					{
+						appId : { value : appId, type : "varchar" },
+						peak  : { value : peak, type : "integer" }
+					},
+					{ datasource : variables.DSN }
+				);
+			} catch ( any e ) {
+				store.delete( appId );
+			}
+		}
+	}
+
+	private struct function ensureStore() {
+		if ( !application.keyExists( variables.CONN_KEY ) ) {
+			lock name="pulselyConnStoreInit" type="exclusive" timeout="10" {
+				if ( !application.keyExists( variables.CONN_KEY ) ) {
+					application[ variables.CONN_KEY ] = {};
+				}
+			}
+		}
+		return application[ variables.CONN_KEY ];
+	}
+
+}
