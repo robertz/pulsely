@@ -33,7 +33,7 @@
 <section class="card">
 	<h2>Apps</h2>
 
-	<bx:if arrayLen( prc.apps ) eq 0>
+	<bx:if arrayLen( prc.apps ) EQ 0>
 		<p class="muted">No apps on this installation yet.</p>
 	<bx:else>
 		<table class="table" id="appsTable">
@@ -57,7 +57,7 @@
 						<td>#encodeForHTML( app.planName )#</td>
 						<td>
 							<span class="tile-value-sm" data-field="liveConnections">#numberFormat( app.liveConnections )#</span>
-							<bx:if app.connectionLimit gt 0>
+							<bx:if app.connectionLimit GT 0>
 								<span class="muted small"> / #numberFormat( app.connectionLimit )#</span>
 							</bx:if>
 						</td>

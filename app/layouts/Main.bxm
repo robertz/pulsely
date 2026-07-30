@@ -13,13 +13,13 @@
 	<div class="topbar-inner">
 		<a class="brand" href="/dashboard"><span class="brand-mark"></span>Pulsely</a>
 		<nav>
-			<bx:if structKeyExists( prc, "account" ) and not prc.account.isEmpty()>
+			<bx:if structKeyExists( prc, "account" ) && !prc.account.isEmpty()>
 				<bx:output>
 					<bx:if prc.account.isAdmin ?: false>
 						<a class="nav-admin" href="/admin">Admin</a>
 					</bx:if>
 					<span class="who">#encodeForHTML( prc.account.email )#</span>
-					<!--- POST, so a third-party page cannot sign the user out. --->
+					<!--- POST, so a third-party page cannot sign the user out. ---> 
 					<form method="post" action="/dashboard/logout" class="inline-form">
 						#csrfField()#
 						<button class="btn btn-ghost btn-sm" type="submit">Sign out</button>

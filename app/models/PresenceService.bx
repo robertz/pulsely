@@ -10,7 +10,6 @@
  * rest of the broker is built on.
  */
 class singleton {
-
 	variables.STORE_KEY = "pulselyPresence";
 
 	function init() {
@@ -22,7 +21,7 @@ class singleton {
 	 * Record a connection as present.
 	 *
 	 * @return { added : boolean, member : {...} } — `added` is true only when this
-	 *         is the user's first connection to the channel.
+	 * is the user's first connection to the channel.
 	 */
 	struct function join(
 		required string destination,
@@ -32,32 +31,35 @@ class singleton {
 	) {
 		var store = ensureStore();
 
-		lock name="pulselyPresence-#hash( destination )#" type="exclusive" timeout="5" {
+		lock name   ="pulselyPresence-#hash( destination )#" type   ="exclusive" timeout="5" {
 			var members = store[ destination ] ?: {};
 			var alreadyPresent = hasUser( members, userId );
 
-			members[ connectionId ] = { "userId" : userId, "userInfo" : userInfo };
+			members[ connectionId ] = { "userId": userId, "userInfo": userInfo };
 			store[ destination ] = members;
 
 			return {
-				added  : !alreadyPresent,
-				member : { "user_id" : userId, "user_info" : userInfo }
+				added : !alreadyPresent,
+				member: { "user_id": userId, "user_info": userInfo }
 			};
 		}
 	}
 
 	/**
 	 * @return { removed : boolean, member : {...} } — `removed` is true only when
-	 *         the user's last connection to the channel has gone.
+	 * the user's last connection to the channel has gone.
 	 */
-	struct function leave( required string destination, required string connectionId ) {
+	struct function leave(
+		required string destination,
+		required string connectionId
+	) {
 		var store = ensureStore();
 
-		lock name="pulselyPresence-#hash( destination )#" type="exclusive" timeout="5" {
+		lock name   ="pulselyPresence-#hash( destination )#" type   ="exclusive" timeout="5" {
 			var members = store[ destination ] ?: {};
 
 			if ( !members.keyExists( connectionId ) ) {
-				return { removed : false, member : {} };
+				return { removed: false, member: {} };
 			}
 
 			var departing = members[ connectionId ];
@@ -70,8 +72,11 @@ class singleton {
 			}
 
 			return {
-				removed : !hasUser( members, departing.userId ),
-				member  : { "user_id" : departing.userId, "user_info" : departing.userInfo }
+				removed: !hasUser( members, departing.userId ),
+				member : {
+					"user_id"  : departing.userId,
+					"user_info": departing.userInfo
+				}
 			};
 		}
 	}
@@ -90,11 +95,13 @@ class singleton {
 			if ( ( store[ destination ] ?: {} ).keyExists( connectionId ) ) {
 				var result = leave( destination, connectionId );
 				if ( !result.member.isEmpty() ) {
-					departures.append( {
-						"destination" : destination,
-						"member"      : result.member,
-						"removed"     : result.removed
-					} );
+					departures.append(
+							{
+								"destination": destination,
+								"member"     : result.member,
+								"removed"    : result.removed
+							}
+						);
 				}
 			}
 		}
@@ -114,7 +121,9 @@ class singleton {
 			var entry = members[ connectionId ];
 			if ( !seen.keyExists( entry.userId ) ) {
 				seen[ entry.userId ] = true;
-				list.append( { "user_id" : entry.userId, "user_info" : entry.userInfo } );
+				list.append(
+						{ "user_id": entry.userId, "user_info": entry.userInfo }
+					);
 			}
 		}
 
@@ -144,7 +153,7 @@ class singleton {
 
 	private struct function ensureStore() {
 		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name="pulselyPresenceInit" type="exclusive" timeout="10" {
+			lock name   ="pulselyPresenceInit" type   ="exclusive" timeout="10" {
 				if ( !application.keyExists( variables.STORE_KEY ) ) {
 					application[ variables.STORE_KEY ] = {};
 				}
@@ -152,5 +161,4 @@ class singleton {
 		}
 		return application[ variables.STORE_KEY ];
 	}
-
 }

@@ -6,7 +6,6 @@
  * dependencies of its own.
  */
 class singleton {
-
 	variables.DSN = "pulsely";
 
 	function init() {
@@ -38,8 +37,8 @@ class singleton {
 			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
 			 WHERE   a.app_key = :appKey
 			   AND   a.is_active = 1",
-			{ appKey : { value : appKey, type : "varchar" } },
-			{ datasource : variables.DSN }
+			{ appKey: { value: appKey, type: "varchar" } },
+			{ datasource: variables.DSN }
 		);
 
 		return result.recordCount ? queryRowToStruct( result, 1 ) : {};
@@ -72,8 +71,8 @@ class singleton {
 			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
 			 WHERE   a.id = UNHEX(:appId)
 			   AND   a.is_active = 1",
-			{ appId : { value : appId, type : "varchar" } },
-			{ datasource : variables.DSN }
+			{ appId: { value: appId, type: "varchar" } },
+			{ datasource: variables.DSN }
 		);
 
 		return result.recordCount ? queryRowToStruct( result, 1 ) : {};
@@ -102,5 +101,4 @@ class singleton {
 		}
 		return row;
 	}
-
 }

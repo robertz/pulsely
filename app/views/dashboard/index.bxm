@@ -10,7 +10,7 @@
 	</form>
 </div>
 
-<bx:if prc.apps.recordCount eq 0>
+<bx:if prc.apps.recordCount EQ 0>
 	<div class="card empty">
 		<h2>Create your first app</h2>
 		<p class="muted">

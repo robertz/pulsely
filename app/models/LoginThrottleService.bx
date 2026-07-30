@@ -12,8 +12,7 @@
  * single-node assumption the rest of the broker is built on.
  */
 class singleton {
-
-	variables.STORE_KEY   = "pulselyLoginAttempts";
+	variables.STORE_KEY = "pulselyLoginAttempts";
 	variables.MAX_FAILURES = 5;
 	variables.WINDOW_SECONDS = 900;
 	variables.LOCKOUT_SECONDS = 900;
@@ -21,14 +20,6 @@ class singleton {
 	function init() {
 		ensureStore();
 		return this;
-	}
-
-	private string function keyFor( required string ip, required string email ) {
-		return lcase( trim( ip ) ) & "|" & lcase( trim( email ) );
-	}
-
-	private numeric function nowEpoch() {
-		return int( getTickCount() / 1000 );
 	}
 
 	/**
@@ -39,13 +30,16 @@ class singleton {
 		var storeKey = keyFor( ip, email );
 
 		if ( !store.keyExists( storeKey ) ) {
-			return { locked : false, retryAfterSeconds : 0 };
+			return { locked: false, retryAfterSeconds: 0 };
 		}
 
 		var record = store[ storeKey ];
 
 		if ( record.lockedUntil > nowEpoch() ) {
-			return { locked : true, retryAfterSeconds : record.lockedUntil - nowEpoch() };
+			return {
+				locked           : true,
+				retryAfterSeconds: record.lockedUntil - nowEpoch()
+			};
 		}
 
 		// Lockout served, or the window lapsed with no further failures.
@@ -53,15 +47,15 @@ class singleton {
 			store.delete( storeKey );
 		}
 
-		return { locked : false, retryAfterSeconds : 0 };
+		return { locked: false, retryAfterSeconds: 0 };
 	}
 
 	function recordFailure( required string ip, required string email ) {
 		var store = ensureStore();
 		var storeKey = keyFor( ip, email );
 
-		lock name="pulselyLogin-#hash( storeKey )#" type="exclusive" timeout="5" {
-			var record = store[ storeKey ] ?: { failures : 0, lastFailureAt : 0, lockedUntil : 0 };
+		lock name   ="pulselyLogin-#hash( storeKey )#" type   ="exclusive" timeout="5" {
+			var record = store[ storeKey ] ?: { failures: 0, lastFailureAt: 0, lockedUntil: 0 };
 
 			// Failures older than the window do not count toward a lockout.
 			if ( record.lastFailureAt < nowEpoch() - variables.WINDOW_SECONDS ) {
@@ -116,9 +110,17 @@ class singleton {
 		return variables.LOCKOUT_SECONDS;
 	}
 
+	private string function keyFor( required string ip, required string email ) {
+		return lcase( trim( ip ) ) & "|" & lcase( trim( email ) );
+	}
+
+	private numeric function nowEpoch() {
+		return int( getTickCount() / 1000 );
+	}
+
 	private struct function ensureStore() {
 		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name="pulselyLoginStoreInit" type="exclusive" timeout="10" {
+			lock name   ="pulselyLoginStoreInit" type   ="exclusive" timeout="10" {
 				if ( !application.keyExists( variables.STORE_KEY ) ) {
 					application[ variables.STORE_KEY ] = {};
 				}
@@ -126,5 +128,4 @@ class singleton {
 		}
 		return application[ variables.STORE_KEY ];
 	}
-
 }

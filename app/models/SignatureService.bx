@@ -21,10 +21,7 @@ class singleton {
 		// backslash escapes, and this string has to match a real newline joined
 		// by customer SDKs in other languages.
 		var LF = char( 10 );
-		return ucase( httpMethod ) & LF
-			& path & LF
-			& timestamp & LF
-			& lcase( hash( body, "SHA-256" ) );
+		return ucase( httpMethod ) & LF & path & LF & timestamp & LF & lcase( hash( body, "SHA-256" ) );
 	}
 
 	string function sign(
@@ -34,11 +31,18 @@ class singleton {
 		required string timestamp,
 		required string body
 	) {
-		return lcase( hmac(
-			buildSigningString( httpMethod, path, timestamp, body ),
-			appSecret,
-			"HMACSHA256"
-		) );
+		return lcase(
+			hmac(
+				buildSigningString(
+					httpMethod,
+					path,
+					timestamp,
+					body
+				),
+				appSecret,
+				"HMACSHA256"
+			)
+		);
 	}
 
 	boolean function verify(
@@ -57,7 +61,13 @@ class singleton {
 			return false;
 		}
 
-		var expected = sign( appSecret, httpMethod, path, timestamp, body );
+		var expected = sign(
+			appSecret,
+			httpMethod,
+			path,
+			timestamp,
+			body
+		);
 		return constantTimeEquals( expected, lcase( trim( providedSignature ) ) );
 	}
 
@@ -67,9 +77,11 @@ class singleton {
 		}
 		var diff = 0;
 		for ( var i = 1; i <= a.len(); i++ ) {
-			diff = bitOr( diff, bitXor( ascii( a.mid( i, 1 ) ), ascii( b.mid( i, 1 ) ) ) );
+			diff = bitOr(
+				diff,
+				bitXor( ascii( a.mid( i, 1 ) ), ascii( b.mid( i, 1 ) ) )
+			);
 		}
 		return diff == 0;
 	}
-
 }

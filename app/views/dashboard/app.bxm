@@ -13,8 +13,8 @@
 		#csrfField()#
 		<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
 		<input type="hidden" name="active" value="#prc.app.is_active ? 1 : 0#">
-		<button class="btn #prc.app.is_active ? 'btn-ghost' : 'btn-primary'#" type="submit">
-			#prc.app.is_active ? 'Pause app' : 'Activate app'#
+		<button class="btn #prc.app.is_active ? "btn-ghost" : "btn-primary"#" type="submit">
+			#prc.app.is_active ? "Pause app" : "Activate app"#
 		</button>
 	</form>
 </div>
@@ -83,7 +83,7 @@
 <section class="card">
 	<h2>Live activity</h2>
 	<ul class="feed" id="feed">
-		<bx:if arrayLen( prc.recentMessages ) eq 0>
+		<bx:if arrayLen( prc.recentMessages ) EQ 0>
 			<li class="feed-empty" id="feedEmpty">Nothing yet. Publish an event and it will appear here instantly.</li>
 		<bx:else>
 			<bx:loop array="#prc.recentMessages#" index="msg">
@@ -104,7 +104,7 @@
 		when a rule matches and your auth endpoint approves the subscriber.
 	</p>
 
-	<bx:if arrayLen( prc.authRules ) eq 0>
+	<bx:if arrayLen( prc.authRules ) EQ 0>
 		<p class="muted">No rules yet.</p>
 	<bx:else>
 		<table class="table">
@@ -156,8 +156,8 @@
 			#csrfField()#
 			<input type="hidden" name="appId" value="#encodeForHTMLAttribute( prc.app.appId )#">
 			<input type="hidden" name="enabled" value="#prc.app.allowsClientEvents ? 1 : 0#">
-			<button class="btn #prc.app.allowsClientEvents ? 'btn-ghost' : 'btn-primary'#" type="submit">
-				#prc.app.allowsClientEvents ? 'Turn off' : 'Turn on'#
+			<button class="btn #prc.app.allowsClientEvents ? "btn-ghost" : "btn-primary"#" type="submit">
+				#prc.app.allowsClientEvents ? "Turn off" : "Turn on"#
 			</button>
 		</form>
 	</div>
@@ -186,7 +186,7 @@
 		Delivery is queued and retried with backoff; a slow endpoint never stalls the broker.
 	</p>
 
-	<bx:if arrayLen( prc.webhooks ) eq 0>
+	<bx:if arrayLen( prc.webhooks ) EQ 0>
 		<p class="muted">No endpoints yet.</p>
 	<bx:else>
 		<table class="table">
@@ -232,7 +232,7 @@
 		</div>
 	</form>
 
-	<bx:if arrayLen( prc.webhookDeliveries ) gt 0>
+	<bx:if arrayLen( prc.webhookDeliveries ) GT 0>
 		<h2 style="margin-top:22px">Recent deliveries</h2>
 		<table class="table">
 			<thead>
@@ -247,7 +247,7 @@
 						<td>
 							<bx:if delivery.delivered>
 								<span class="pill pill-ok">#delivery.lastStatus#</span>
-							<bx:elseif delivery.attempts gte 5>
+							<bx:elseif delivery.attempts GTE 5>
 								<span class="pill pill-off">gave up</span>
 							<bx:else>
 								<span class="pill">retrying</span>

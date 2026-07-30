@@ -1,5 +1,4 @@
 class extends="coldbox.system.testing.BaseTestCase" {
-
 	this.loadColdBox = true;
 	this.unloadColdBox = false;
 
@@ -10,228 +9,402 @@ class extends="coldbox.system.testing.BaseTestCase" {
 		variables.webhooks = getInstance( "WebhookService" );
 	}
 
+	function run() {
+		describe(
+			"endpoint management",
+			() => {
+				beforeEach( () => reset() );
+				afterEach( () => reset() );
+
+				it(
+					"registers an endpoint with its event types",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://example.com/hook",
+								[ "channel_occupied", "member_added"]
+							);
+
+						var registered = variables.webhooks.getWebhooks( variables.APP_ID );
+						expect( registered.len() ).toBe( 1 );
+						expect( registered[ 1 ].url ).toBe( "https://example.com/hook" );
+						expect( registered[ 1 ].events ).toInclude( "channel_occupied" );
+						expect( registered[ 1 ].isActive ).toBeTrue();
+					}
+				);
+
+				/**
+				 * An unknown event type would silently never fire, so it is dropped at
+				 * registration rather than stored and forgotten.
+				 */
+				it(
+					"ignores event types it does not emit",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://example.com/hook",
+								[ "channel_occupied", "not_a_real_event"]
+							);
+
+						var events = variables.webhooks.getWebhooks( variables.APP_ID )[ 1 ].events;
+						expect( events ).toInclude( "channel_occupied" );
+						expect( events ).notToInclude( "not_a_real_event" );
+					}
+				);
+
+				it(
+					"updates an endpoint rather than duplicating it",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://example.com/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://example.com/hook",
+								[ "member_added"]
+							);
+
+						var registered = variables.webhooks.getWebhooks( variables.APP_ID );
+						expect( registered.len() ).toBe(
+								1,
+								"the unique key on (app_id, url) must prevent a second row"
+							);
+						expect( registered[ 1 ].events ).toInclude( "member_added" );
+					}
+				);
+
+				it(
+					"removes an endpoint",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://example.com/hook",
+								[ "channel_occupied"]
+							);
+						var id = variables.webhooks.getWebhooks( variables.APP_ID )[ 1 ].webhookId;
+
+						variables.webhooks.deleteWebhook( variables.APP_ID, id );
+
+						expect( variables.webhooks.getWebhooks( variables.APP_ID ) ).toBeEmpty();
+					}
+				);
+			}
+		);
+
+		describe(
+			"queueing",
+			() => {
+				beforeEach( () => reset() );
+				afterEach( () => reset() );
+
+				it(
+					"queues nothing when no endpoint is registered",
+					() => {
+						expect(
+							variables.webhooks.enqueue(
+									variables.APP_ID,
+									"channel_occupied",
+									{ "channel": "x" }
+								)
+						).toBe( 0 );
+						expect( queuedCount() ).toBe( 0 );
+					}
+				);
+
+				it(
+					"queues one delivery per subscribed endpoint",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://a.example.com/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://b.example.com/hook",
+								[ "channel_occupied"]
+							);
+
+						expect(
+							variables.webhooks.enqueue(
+									variables.APP_ID,
+									"channel_occupied",
+									{ "channel": "x" }
+								)
+						).toBe( 2 );
+						expect( queuedCount() ).toBe( 2 );
+					}
+				);
+
+				/**
+				 * An endpoint should only hear about what it asked for — otherwise
+				 * subscribing to one event type means receiving all of them.
+				 */
+				it(
+					"skips endpoints that did not ask for the event",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://a.example.com/hook",
+								[ "member_added"]
+							);
+
+						expect(
+							variables.webhooks.enqueue(
+									variables.APP_ID,
+									"channel_occupied",
+									{ "channel": "x" }
+								)
+						).toBe( 0 );
+						expect( queuedCount() ).toBe( 0 );
+					}
+				);
+
+				it(
+					"records the payload with the app and event",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://a.example.com/hook",
+								[ "member_added"]
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"member_added",
+								{ "channel": "presence-x" }
+							);
+
+						var row = queryExecute(
+							"SELECT event_type, payload FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
+							{ app: variables.APP_ID },
+							{ datasource: "pulsely" }
+						);
+						var payload = jsonDeserialize( row.payload[ 1 ] );
+
+						expect( row.event_type[ 1 ] ).toBe( "member_added" );
+						expect( payload.event ).toBe( "member_added" );
+						expect( payload.app_id ).toBe( variables.APP_ID );
+						expect( payload.data.channel ).toBe( "presence-x" );
+					}
+				);
+
+				it(
+					"queues nothing for an app with no endpoints even when others have them",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://a.example.com/hook",
+								[ "channel_occupied"]
+							);
+
+						expect(
+							variables.webhooks.enqueue(
+									"55555555555555555555555555555555",
+									"channel_occupied",
+									{ "channel": "x" }
+								)
+						).toBe( 0 );
+					}
+				);
+			}
+		);
+
+		describe(
+			"delivery",
+			() => {
+				beforeEach( () => reset() );
+				afterEach( () => reset() );
+
+				/**
+				 * Nothing listens on port 1, so this exercises the failure path without
+				 * needing a stub server.
+				 */
+				it(
+					"retries a failed delivery rather than dropping it",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"http://127.0.0.1:1/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"channel_occupied",
+								{ "channel": "x" }
+							);
+
+						var report = variables.webhooks.deliverPending();
+						expect( report.attempted ).toBe( 1 );
+						expect( report.failed ).toBe( 1 );
+
+						var row = queryExecute(
+							"SELECT attempts, delivered_at, next_attempt_at FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
+							{ app: variables.APP_ID },
+							{ datasource: "pulsely" }
+						);
+						expect( row.attempts[ 1 ] ).toBe( 1 );
+						expect(
+							isNull( row.delivered_at[ 1 ] ) || row.delivered_at[ 1 ] == ""
+						).toBeTrue();
+						expect(
+							isNull( row.next_attempt_at[ 1 ] ) || row.next_attempt_at[ 1 ] == ""
+						).toBeFalse( "a retry should be scheduled" );
+					}
+				);
+
+				it(
+					"gives up after the maximum attempts",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"http://127.0.0.1:1/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"channel_occupied",
+								{ "channel": "x" }
+							);
+
+						// Pretend the earlier attempts already happened and are due again.
+						queryExecute(
+							"UPDATE webhook_deliveries SET attempts = :attempts, next_attempt_at = NOW()
+					 WHERE app_id = UNHEX(:app)",
+							{
+								app     : variables.APP_ID,
+								attempts: variables.webhooks.maxAttempts() - 1
+							},
+							{ datasource: "pulsely" }
+						);
+
+						variables.webhooks.deliverPending();
+
+						var row = queryExecute(
+							"SELECT attempts, next_attempt_at FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
+							{ app: variables.APP_ID },
+							{ datasource: "pulsely" }
+						);
+						expect( row.attempts[ 1 ] ).toBe( variables.webhooks.maxAttempts() );
+						expect(
+							isNull( row.next_attempt_at[ 1 ] ) || row.next_attempt_at[ 1 ] == ""
+						).toBeTrue( "an exhausted delivery must stop being selected" );
+					}
+				);
+
+				it(
+					"does not attempt a delivery whose retry is not yet due",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"http://127.0.0.1:1/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"channel_occupied",
+								{ "channel": "x" }
+							);
+
+						queryExecute(
+							"UPDATE webhook_deliveries SET next_attempt_at = DATE_ADD(NOW(), INTERVAL 1 HOUR)
+					 WHERE app_id = UNHEX(:app)",
+							{ app: variables.APP_ID },
+							{ datasource: "pulsely" }
+						);
+
+						expect( variables.webhooks.deliverPending().attempted ).toBe( 0 );
+					}
+				);
+			}
+		);
+
+		describe(
+			"housekeeping",
+			() => {
+				beforeEach( () => reset() );
+				afterEach( () => reset() );
+
+				it(
+					"purges old delivered rows and keeps recent ones",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://a.example.com/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"channel_occupied",
+								{ "channel": "old" }
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"channel_occupied",
+								{ "channel": "new" }
+							);
+
+						queryExecute(
+							"UPDATE webhook_deliveries SET delivered_at = DATE_SUB(NOW(), INTERVAL 48 HOUR)
+					 WHERE app_id = UNHEX(:app) AND payload LIKE '%old%'",
+							{ app: variables.APP_ID },
+							{ datasource: "pulsely" }
+						);
+						queryExecute(
+							"UPDATE webhook_deliveries SET delivered_at = NOW()
+					 WHERE app_id = UNHEX(:app) AND payload LIKE '%new%'",
+							{ app: variables.APP_ID },
+							{ datasource: "pulsely" }
+						);
+
+						variables.webhooks.purgeDelivered( 24 );
+
+						expect( queuedCount() ).toBe( 1, "only the aged delivery should go" );
+					}
+				);
+
+				it(
+					"never purges an undelivered row",
+					() => {
+						variables.webhooks.addWebhook(
+								variables.APP_ID,
+								"https://a.example.com/hook",
+								[ "channel_occupied"]
+							);
+						variables.webhooks.enqueue(
+								variables.APP_ID,
+								"channel_occupied",
+								{ "channel": "pending" }
+							);
+
+						variables.webhooks.purgeDelivered( 0 );
+
+						expect( queuedCount() ).toBe( 1 );
+					}
+				);
+			}
+		);
+	}
+
 	private function reset() {
-		queryExecute( "DELETE FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
-			{ app : variables.APP_ID }, { datasource : "pulsely" } );
-		queryExecute( "DELETE FROM app_webhooks WHERE app_id = UNHEX(:app)",
-			{ app : variables.APP_ID }, { datasource : "pulsely" } );
+		queryExecute(
+			"DELETE FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
+			{ app: variables.APP_ID },
+			{ datasource: "pulsely" }
+		);
+		queryExecute(
+			"DELETE FROM app_webhooks WHERE app_id = UNHEX(:app)",
+			{ app: variables.APP_ID },
+			{ datasource: "pulsely" }
+		);
 	}
 
 	private numeric function queuedCount() {
 		return queryExecute(
 			"SELECT COUNT(*) AS c FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
-			{ app : variables.APP_ID }, { datasource : "pulsely" }
+			{ app: variables.APP_ID },
+			{ datasource: "pulsely" }
 		).c[ 1 ];
 	}
-
-	function run() {
-
-		describe( "endpoint management", () => {
-
-			beforeEach( () => reset() );
-			afterEach( () => reset() );
-
-			it( "registers an endpoint with its event types", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://example.com/hook",
-					[ "channel_occupied", "member_added" ] );
-
-				var registered = variables.webhooks.getWebhooks( variables.APP_ID );
-				expect( registered.len() ).toBe( 1 );
-				expect( registered[ 1 ].url ).toBe( "https://example.com/hook" );
-				expect( registered[ 1 ].events ).toInclude( "channel_occupied" );
-				expect( registered[ 1 ].isActive ).toBeTrue();
-			} );
-
-			/**
-			 * An unknown event type would silently never fire, so it is dropped at
-			 * registration rather than stored and forgotten.
-			 */
-			it( "ignores event types it does not emit", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://example.com/hook",
-					[ "channel_occupied", "not_a_real_event" ] );
-
-				var events = variables.webhooks.getWebhooks( variables.APP_ID )[ 1 ].events;
-				expect( events ).toInclude( "channel_occupied" );
-				expect( events ).notToInclude( "not_a_real_event" );
-			} );
-
-			it( "updates an endpoint rather than duplicating it", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://example.com/hook", [ "channel_occupied" ] );
-				variables.webhooks.addWebhook( variables.APP_ID, "https://example.com/hook", [ "member_added" ] );
-
-				var registered = variables.webhooks.getWebhooks( variables.APP_ID );
-				expect( registered.len() ).toBe( 1, "the unique key on (app_id, url) must prevent a second row" );
-				expect( registered[ 1 ].events ).toInclude( "member_added" );
-			} );
-
-			it( "removes an endpoint", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://example.com/hook", [ "channel_occupied" ] );
-				var id = variables.webhooks.getWebhooks( variables.APP_ID )[ 1 ].webhookId;
-
-				variables.webhooks.deleteWebhook( variables.APP_ID, id );
-
-				expect( variables.webhooks.getWebhooks( variables.APP_ID ) ).toBeEmpty();
-			} );
-
-		} );
-
-		describe( "queueing", () => {
-
-			beforeEach( () => reset() );
-			afterEach( () => reset() );
-
-			it( "queues nothing when no endpoint is registered", () => {
-				expect( variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "x" } ) ).toBe( 0 );
-				expect( queuedCount() ).toBe( 0 );
-			} );
-
-			it( "queues one delivery per subscribed endpoint", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://a.example.com/hook", [ "channel_occupied" ] );
-				variables.webhooks.addWebhook( variables.APP_ID, "https://b.example.com/hook", [ "channel_occupied" ] );
-
-				expect( variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "x" } ) ).toBe( 2 );
-				expect( queuedCount() ).toBe( 2 );
-			} );
-
-			/**
-			 * An endpoint should only hear about what it asked for — otherwise
-			 * subscribing to one event type means receiving all of them.
-			 */
-			it( "skips endpoints that did not ask for the event", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://a.example.com/hook", [ "member_added" ] );
-
-				expect( variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "x" } ) ).toBe( 0 );
-				expect( queuedCount() ).toBe( 0 );
-			} );
-
-			it( "records the payload with the app and event", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://a.example.com/hook", [ "member_added" ] );
-				variables.webhooks.enqueue( variables.APP_ID, "member_added", { "channel" : "presence-x" } );
-
-				var row = queryExecute(
-					"SELECT event_type, payload FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
-					{ app : variables.APP_ID }, { datasource : "pulsely" }
-				);
-				var payload = jsonDeserialize( row.payload[ 1 ] );
-
-				expect( row.event_type[ 1 ] ).toBe( "member_added" );
-				expect( payload.event ).toBe( "member_added" );
-				expect( payload.app_id ).toBe( variables.APP_ID );
-				expect( payload.data.channel ).toBe( "presence-x" );
-			} );
-
-			it( "queues nothing for an app with no endpoints even when others have them", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://a.example.com/hook", [ "channel_occupied" ] );
-
-				expect( variables.webhooks.enqueue(
-					"55555555555555555555555555555555", "channel_occupied", { "channel" : "x" }
-				) ).toBe( 0 );
-			} );
-
-		} );
-
-		describe( "delivery", () => {
-
-			beforeEach( () => reset() );
-			afterEach( () => reset() );
-
-			/**
-			 * Nothing listens on port 1, so this exercises the failure path without
-			 * needing a stub server.
-			 */
-			it( "retries a failed delivery rather than dropping it", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "http://127.0.0.1:1/hook", [ "channel_occupied" ] );
-				variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "x" } );
-
-				var report = variables.webhooks.deliverPending();
-				expect( report.attempted ).toBe( 1 );
-				expect( report.failed ).toBe( 1 );
-
-				var row = queryExecute(
-					"SELECT attempts, delivered_at, next_attempt_at FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
-					{ app : variables.APP_ID }, { datasource : "pulsely" }
-				);
-				expect( row.attempts[ 1 ] ).toBe( 1 );
-				expect( isNull( row.delivered_at[ 1 ] ) || row.delivered_at[ 1 ] == "" ).toBeTrue();
-				expect( isNull( row.next_attempt_at[ 1 ] ) || row.next_attempt_at[ 1 ] == "" )
-					.toBeFalse( "a retry should be scheduled" );
-			} );
-
-			it( "gives up after the maximum attempts", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "http://127.0.0.1:1/hook", [ "channel_occupied" ] );
-				variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "x" } );
-
-				// Pretend the earlier attempts already happened and are due again.
-				queryExecute(
-					"UPDATE webhook_deliveries SET attempts = :attempts, next_attempt_at = NOW()
-					 WHERE app_id = UNHEX(:app)",
-					{ app : variables.APP_ID, attempts : variables.webhooks.maxAttempts() - 1 },
-					{ datasource : "pulsely" }
-				);
-
-				variables.webhooks.deliverPending();
-
-				var row = queryExecute(
-					"SELECT attempts, next_attempt_at FROM webhook_deliveries WHERE app_id = UNHEX(:app)",
-					{ app : variables.APP_ID }, { datasource : "pulsely" }
-				);
-				expect( row.attempts[ 1 ] ).toBe( variables.webhooks.maxAttempts() );
-				expect( isNull( row.next_attempt_at[ 1 ] ) || row.next_attempt_at[ 1 ] == "" )
-					.toBeTrue( "an exhausted delivery must stop being selected" );
-			} );
-
-			it( "does not attempt a delivery whose retry is not yet due", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "http://127.0.0.1:1/hook", [ "channel_occupied" ] );
-				variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "x" } );
-
-				queryExecute(
-					"UPDATE webhook_deliveries SET next_attempt_at = DATE_ADD(NOW(), INTERVAL 1 HOUR)
-					 WHERE app_id = UNHEX(:app)",
-					{ app : variables.APP_ID }, { datasource : "pulsely" }
-				);
-
-				expect( variables.webhooks.deliverPending().attempted ).toBe( 0 );
-			} );
-
-		} );
-
-		describe( "housekeeping", () => {
-
-			beforeEach( () => reset() );
-			afterEach( () => reset() );
-
-			it( "purges old delivered rows and keeps recent ones", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://a.example.com/hook", [ "channel_occupied" ] );
-				variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "old" } );
-				variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "new" } );
-
-				queryExecute(
-					"UPDATE webhook_deliveries SET delivered_at = DATE_SUB(NOW(), INTERVAL 48 HOUR)
-					 WHERE app_id = UNHEX(:app) AND payload LIKE '%old%'",
-					{ app : variables.APP_ID }, { datasource : "pulsely" }
-				);
-				queryExecute(
-					"UPDATE webhook_deliveries SET delivered_at = NOW()
-					 WHERE app_id = UNHEX(:app) AND payload LIKE '%new%'",
-					{ app : variables.APP_ID }, { datasource : "pulsely" }
-				);
-
-				variables.webhooks.purgeDelivered( 24 );
-
-				expect( queuedCount() ).toBe( 1, "only the aged delivery should go" );
-			} );
-
-			it( "never purges an undelivered row", () => {
-				variables.webhooks.addWebhook( variables.APP_ID, "https://a.example.com/hook", [ "channel_occupied" ] );
-				variables.webhooks.enqueue( variables.APP_ID, "channel_occupied", { "channel" : "pending" } );
-
-				variables.webhooks.purgeDelivered( 0 );
-
-				expect( queuedCount() ).toBe( 1 );
-			} );
-
-		} );
-
-	}
-
 }

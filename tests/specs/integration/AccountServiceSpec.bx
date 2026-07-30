@@ -3,14 +3,13 @@
  * live ColdBox context rather than a hand-built instance.
  */
 class extends="coldbox.system.testing.BaseTestCase" {
-
 	this.loadColdBox = true;
 	this.unloadColdBox = false;
 
-	variables.DEV_ACCOUNT   = "11111111111111111111111111111111";
-	variables.DEV_APP       = "22222222222222222222222222222222";
+	variables.DEV_ACCOUNT = "11111111111111111111111111111111";
+	variables.DEV_APP = "22222222222222222222222222222222";
 	variables.OTHER_ACCOUNT = "44444444444444444444444444444444";
-	variables.OTHER_APP     = "55555555555555555555555555555555";
+	variables.OTHER_APP = "55555555555555555555555555555555";
 
 	function beforeAll() {
 		super.beforeAll();
@@ -18,438 +17,636 @@ class extends="coldbox.system.testing.BaseTestCase" {
 	}
 
 	function run() {
+		describe(
+			"authenticate()",
+			() => {
+				it(
+					"accepts the seeded dev credentials",
+					() => {
+						var account = variables.accounts.authenticate( "dev@example.com", "pulsely" );
 
-		describe( "authenticate()", () => {
-
-			it( "accepts the seeded dev credentials", () => {
-				var account = variables.accounts.authenticate( "dev@example.com", "pulsely" );
-
-				expect( account ).notToBeEmpty();
-				expect( account.accountId ).toBe( variables.DEV_ACCOUNT );
-				expect( account.email ).toBe( "dev@example.com" );
-			} );
-
-			it( "never returns the password hash to the caller", () => {
-				var account = variables.accounts.authenticate( "dev@example.com", "pulsely" );
-
-				expect( account ).notToHaveKey( "password_hash" );
-			} );
-
-			it( "rejects a wrong password", () => {
-				expect( variables.accounts.authenticate( "dev@example.com", "wrong" ) ).toBeEmpty();
-				expect( variables.accounts.authenticate( "dev@example.com", "" ) ).toBeEmpty();
-			} );
-
-			it( "rejects an unknown email", () => {
-				expect( variables.accounts.authenticate( "nobody@example.com", "pulsely" ) ).toBeEmpty();
-			} );
-
-			it( "does not treat sql metacharacters as syntax", () => {
-				expect( variables.accounts.authenticate( "' OR 1=1 --", "pulsely" ) ).toBeEmpty();
-			} );
-
-		} );
-
-		describe( "createAccount()", () => {
-
-			var made = [];
-
-			// Only ever removes accounts these specs actually created, by id. Keying
-			// cleanup off the submitted email would target pre-existing accounts on
-			// the duplicate-email cases.
-			afterEach( () => {
-				for ( var accountId in made ) {
-					queryExecute(
-						"DELETE FROM accounts WHERE id = UNHEX(:id)",
-						{ id : accountId },
-						{ datasource : "pulsely" }
-					);
-				}
-				made.clear();
-			} );
-
-			var signUp = ( struct overrides = {} ) => {
-				var result = variables.accounts.createAccount(
-					overrides.email ?: "spec-#createUUID().lcase().left( 8 )#@test.local",
-					overrides.name ?: "Spec User",
-					overrides.password ?: "hunter2hunter2",
-					overrides.confirm ?: ( overrides.password ?: "hunter2hunter2" )
+						expect( account ).notToBeEmpty();
+						expect( account.accountId ).toBe( variables.DEV_ACCOUNT );
+						expect( account.email ).toBe( "dev@example.com" );
+					}
 				);
 
-				if ( result.keyExists( "account" ) ) {
-					made.append( result.account.accountId );
-				}
-				return result;
-			};
+				it(
+					"never returns the password hash to the caller",
+					() => {
+						var account = variables.accounts.authenticate( "dev@example.com", "pulsely" );
 
-			it( "creates an account and returns its identity", () => {
-				var result = signUp();
+						expect( account ).notToHaveKey( "password_hash" );
+					}
+				);
 
-				expect( result ).toHaveKey( "account" );
-				expect( result ).notToHaveKey( "error" );
-				expect( result.account.accountId ).toMatch( "^[0-9a-f]{32}$" );
-				expect( result.account.name ).toBe( "Spec User" );
-			} );
+				it(
+					"rejects a wrong password",
+					() => {
+						expect( variables.accounts.authenticate( "dev@example.com", "wrong" ) ).toBeEmpty();
+						expect( variables.accounts.authenticate( "dev@example.com", "" ) ).toBeEmpty();
+					}
+				);
 
-			it( "puts new accounts on the cheapest active plan", () => {
-				var result = signUp();
+				it(
+					"rejects an unknown email",
+					() => {
+						expect( variables.accounts.authenticate( "nobody@example.com", "pulsely" ) ).toBeEmpty();
+					}
+				);
 
-				var row = queryExecute(
-					"SELECT p.name AS planName FROM accounts a
+				it(
+					"does not treat sql metacharacters as syntax",
+					() => {
+						expect( variables.accounts.authenticate( "' OR 1=1 --", "pulsely" ) ).toBeEmpty();
+					}
+				);
+			}
+		);
+
+		describe(
+			"createAccount()",
+			() => {
+				var made = [];
+
+				// Only ever removes accounts these specs actually created, by id. Keying
+				// cleanup off the submitted email would target pre-existing accounts on
+				// the duplicate-email cases.
+				afterEach(
+					() => {
+						for ( var accountId in made ) {
+							queryExecute(
+								"DELETE FROM accounts WHERE id = UNHEX(:id)",
+								{ id: accountId },
+								{ datasource: "pulsely" }
+							);
+						}
+						made.clear();
+					}
+				);
+
+				var signUp = ( struct overrides = {} ) => {
+					var result = variables.accounts.createAccount(
+							overrides.email ?: "spec-#createUUID().lcase().left( 8 )#@test.local",
+							overrides.name ?: "Spec User",
+							overrides.password ?: "hunter2hunter2",
+							overrides.confirm ?: ( overrides.password ?: "hunter2hunter2" )
+						);
+
+					if ( result.keyExists( "account" ) ) {
+						made.append( result.account.accountId );
+					}
+					return result;
+				};
+
+				it(
+					"creates an account and returns its identity",
+					() => {
+						var result = signUp();
+
+						expect( result ).toHaveKey( "account" );
+						expect( result ).notToHaveKey( "error" );
+						expect( result.account.accountId ).toMatch( "^[0-9a-f]{32}$" );
+						expect( result.account.name ).toBe( "Spec User" );
+					}
+				);
+
+				it(
+					"puts new accounts on the cheapest active plan",
+					() => {
+						var result = signUp();
+
+						var row = queryExecute(
+							"SELECT p.name AS planName FROM accounts a
 					 JOIN plans p ON p.id = a.plan_id WHERE a.id = UNHEX(:id)",
-					{ id : result.account.accountId },
-					{ datasource : "pulsely" }
+							{ id: result.account.accountId },
+							{ datasource: "pulsely" }
+						);
+
+						expect( row.recordCount ).toBe( 1 );
+						expect( row.planName[ 1 ] ).toBe( "Sandbox" );
+					}
 				);
 
-				expect( row.recordCount ).toBe( 1 );
-				expect( row.planName[ 1 ] ).toBe( "Sandbox" );
-			} );
+				it(
+					"stores a pbkdf2 hash, never the plaintext password",
+					() => {
+						var result = signUp( { password: "correct-horse-battery" } );
 
-			it( "stores a pbkdf2 hash, never the plaintext password", () => {
-				var result = signUp( { password : "correct-horse-battery" } );
+						var row = queryExecute(
+							"SELECT password_hash FROM accounts WHERE id = UNHEX(:id)",
+							{ id: result.account.accountId },
+							{ datasource: "pulsely" }
+						);
 
-				var row = queryExecute(
-					"SELECT password_hash FROM accounts WHERE id = UNHEX(:id)",
-					{ id : result.account.accountId },
-					{ datasource : "pulsely" }
+						expect( row.password_hash[ 1 ] ).toInclude( "pbkdf2$210000$" );
+						expect( row.password_hash[ 1 ] ).notToInclude( "correct-horse-battery" );
+					}
 				);
 
-				expect( row.password_hash[ 1 ] ).toInclude( "pbkdf2$210000$" );
-				expect( row.password_hash[ 1 ] ).notToInclude( "correct-horse-battery" );
-			} );
+				it(
+					"produces an account that can immediately sign in",
+					() => {
+						var email = "spec-login-#createUUID().lcase().left( 8 )#@test.local";
+						signUp( { email: email, password: "hunter2hunter2" } );
 
-			it( "produces an account that can immediately sign in", () => {
-				var email = "spec-login-#createUUID().lcase().left( 8 )#@test.local";
-				signUp( { email : email, password : "hunter2hunter2" } );
-
-				expect( variables.accounts.authenticate( email, "hunter2hunter2" ) ).notToBeEmpty();
-				expect( variables.accounts.authenticate( email, "wrong-password" ) ).toBeEmpty();
-			} );
-
-			it( "normalises the email so case cannot create a second account", () => {
-				var mixed = "Spec-Case-#createUUID().lcase().left( 6 )#@Test.Local";
-				var result = signUp( { email : mixed } );
-
-				expect( result.account.email ).toBe( lcase( mixed ) );
-				expect( variables.accounts.authenticate( ucase( mixed ), "hunter2hunter2" ) ).notToBeEmpty();
-			} );
-
-			it( "rejects a duplicate email", () => {
-				var email = "spec-dupe-#createUUID().lcase().left( 8 )#@test.local";
-				expect( signUp( { email : email } ) ).toHaveKey( "account" );
-
-				var second = signUp( { email : email } );
-
-				expect( second ).toHaveKey( "error" );
-				expect( second.error ).toInclude( "already exists" );
-			} );
-
-			it( "rejects the seeded dev email", () => {
-				expect( signUp( { email : "dev@example.com" } ) ).toHaveKey( "error" );
-			} );
-
-			it( "requires a name", () => {
-				expect( signUp( { name : "" } ) ).toHaveKey( "error" );
-				expect( signUp( { name : "   " } ) ).toHaveKey( "error" );
-			} );
-
-			it( "requires a plausible email address", () => {
-				for ( var bad in [ "", "   ", "not-an-email", "missing@domain", "@example.com" ] ) {
-					expect( signUp( { email : bad } ) ).toHaveKey( "error", "should reject [#bad#]" );
-				}
-			} );
-
-			it( "requires a password of at least 8 characters", () => {
-				expect( signUp( { password : "short" } ) ).toHaveKey( "error" );
-				expect( signUp( { password : "1234567" } ) ).toHaveKey( "error" );
-				expect( signUp( { password : "12345678" } ) ).toHaveKey( "account" );
-			} );
-
-			it( "requires the confirmation to match, case included", () => {
-				var mismatch = signUp( { password : "hunter2hunter2", confirm : "Hunter2Hunter2" } );
-
-				expect( mismatch ).toHaveKey( "error" );
-				expect( mismatch.error ).toInclude( "match" );
-			} );
-
-			it( "writes nothing when validation fails", () => {
-				var email = "spec-reject-#createUUID().lcase().left( 8 )#@test.local";
-				signUp( { email : email, password : "short" } );
-
-				expect( variables.accounts.emailExists( email ) ).toBeFalse();
-			} );
-
-			it( "does not treat sql metacharacters in the name as syntax", () => {
-				var result = signUp( { name : "Robert'); DROP TABLE accounts;--" } );
-
-				expect( result ).toHaveKey( "account" );
-				expect( queryExecute(
-					"SELECT COUNT(*) AS c FROM accounts", {}, { datasource : "pulsely" }
-				).c[ 1 ] ).toBeGT( 0, "accounts table must still be there" );
-			} );
-
-		} );
-
-		describe( "getDefaultPlanId()", () => {
-
-			it( "returns the cheapest active plan", () => {
-				var planId = variables.accounts.getDefaultPlanId();
-
-				expect( planId ).toMatch( "^[0-9a-f]{32}$" );
-
-				var row = queryExecute(
-					"SELECT name, price_cents FROM plans WHERE id = UNHEX(:id)",
-					{ id : planId },
-					{ datasource : "pulsely" }
+						expect( variables.accounts.authenticate( email, "hunter2hunter2" ) ).notToBeEmpty();
+						expect( variables.accounts.authenticate( email, "wrong-password" ) ).toBeEmpty();
+					}
 				);
-				expect( row.name[ 1 ] ).toBe( "Sandbox" );
-				expect( row.price_cents[ 1 ] ).toBe( 0 );
-			} );
 
-		} );
+				it(
+					"normalises the email so case cannot create a second account",
+					() => {
+						var mixed = "Spec-Case-#createUUID().lcase().left( 6 )#@Test.Local";
+						var result = signUp( { email: mixed } );
 
-		describe( "emailExists()", () => {
+						expect( result.account.email ).toBe( lcase( mixed ) );
+						expect( variables.accounts.authenticate( ucase( mixed ), "hunter2hunter2" ) ).notToBeEmpty();
+					}
+				);
 
-			it( "sees a seeded account and not an invented one", () => {
-				expect( variables.accounts.emailExists( "dev@example.com" ) ).toBeTrue();
-				expect( variables.accounts.emailExists( "DEV@EXAMPLE.COM" ) ).toBeTrue();
-				expect( variables.accounts.emailExists( "nobody-here@example.com" ) ).toBeFalse();
-			} );
+				it(
+					"rejects a duplicate email",
+					() => {
+						var email = "spec-dupe-#createUUID().lcase().left( 8 )#@test.local";
+						expect( signUp( { email: email } ) ).toHaveKey( "account" );
 
-		} );
+						var second = signUp( { email: email } );
 
-		describe( "getApps()", () => {
+						expect( second ).toHaveKey( "error" );
+						expect( second.error ).toInclude( "already exists" );
+					}
+				);
 
-			it( "returns only the caller's own apps", () => {
-				var apps = variables.accounts.getApps( variables.DEV_ACCOUNT );
+				it(
+					"rejects the seeded dev email",
+					() => {
+						expect( signUp( { email: "dev@example.com" } ) ).toHaveKey( "error" );
+					}
+				);
 
-				expect( apps.recordCount ).toBeGTE( 1 );
-				for ( var row in apps ) {
-					expect( row.appId ).notToBe( variables.OTHER_APP, "another account's app must never appear" );
-				}
-			} );
+				it(
+					"requires a name",
+					() => {
+						expect( signUp( { name: "" } ) ).toHaveKey( "error" );
+						expect( signUp( { name: "   " } ) ).toHaveKey( "error" );
+					}
+				);
 
-			it( "resolves the plan through the account when the app has no override", () => {
-				var apps = variables.accounts.getApps( variables.DEV_ACCOUNT );
-				var devApp = "";
-				for ( var row in apps ) {
-					if ( row.appId == variables.DEV_APP ) devApp = row.planName;
-				}
+				it(
+					"requires a plausible email address",
+					() => {
+						for ( var bad in [ "", "   ", "not-an-email", "missing@domain", "@example.com"] ) {
+							expect( signUp( { email: bad } ) ).toHaveKey( "error", "should reject [#bad#]" );
+						}
+					}
+				);
 
-				expect( devApp ).toBe( "Business" );
-			} );
+				it(
+					"requires a password of at least 8 characters",
+					() => {
+						expect( signUp( { password: "short" } ) ).toHaveKey( "error" );
+						expect( signUp( { password: "1234567" } ) ).toHaveKey( "error" );
+						expect( signUp( { password: "12345678" } ) ).toHaveKey( "account" );
+					}
+				);
 
-			it( "returns nothing for an account with no apps", () => {
-				expect( variables.accounts.getApps( "ee000000000000000000000000000009" ).recordCount ).toBe( 0 );
-			} );
+				it(
+					"requires the confirmation to match, case included",
+					() => {
+						var mismatch = signUp(
+							{ password: "hunter2hunter2", confirm: "Hunter2Hunter2" }
+						);
 
-		} );
+						expect( mismatch ).toHaveKey( "error" );
+						expect( mismatch.error ).toInclude( "match" );
+					}
+				);
+
+				it(
+					"writes nothing when validation fails",
+					() => {
+						var email = "spec-reject-#createUUID().lcase().left( 8 )#@test.local";
+						signUp( { email: email, password: "short" } );
+
+						expect( variables.accounts.emailExists( email ) ).toBeFalse();
+					}
+				);
+
+				it(
+					"does not treat sql metacharacters in the name as syntax",
+					() => {
+						var result = signUp( { name: "Robert'); DROP TABLE accounts;--" } );
+
+						expect( result ).toHaveKey( "account" );
+						expect( queryExecute(
+								"SELECT COUNT(*) AS c FROM accounts",
+								{},
+								{ datasource: "pulsely" }
+							).c[ 1 ] ).toBeGT( 0, "accounts table must still be there" );
+					}
+				);
+			}
+		);
+
+		describe(
+			"getDefaultPlanId()",
+			() => {
+				it(
+					"returns the cheapest active plan",
+					() => {
+						var planId = variables.accounts.getDefaultPlanId();
+
+						expect( planId ).toMatch( "^[0-9a-f]{32}$" );
+
+						var row = queryExecute(
+							"SELECT name, price_cents FROM plans WHERE id = UNHEX(:id)",
+							{ id: planId },
+							{ datasource: "pulsely" }
+						);
+						expect( row.name[ 1 ] ).toBe( "Sandbox" );
+						expect( row.price_cents[ 1 ] ).toBe( 0 );
+					}
+				);
+			}
+		);
+
+		describe(
+			"emailExists()",
+			() => {
+				it(
+					"sees a seeded account and not an invented one",
+					() => {
+						expect( variables.accounts.emailExists( "dev@example.com" ) ).toBeTrue();
+						expect( variables.accounts.emailExists( "DEV@EXAMPLE.COM" ) ).toBeTrue();
+						expect( variables.accounts.emailExists( "nobody-here@example.com" ) ).toBeFalse();
+					}
+				);
+			}
+		);
+
+		describe(
+			"getApps()",
+			() => {
+				it(
+					"returns only the caller's own apps",
+					() => {
+						var apps = variables.accounts.getApps( variables.DEV_ACCOUNT );
+
+						expect( apps.recordCount ).toBeGTE( 1 );
+						for ( var row in apps ) {
+							expect( row.appId ).notToBe( variables.OTHER_APP,
+									"another account's app must never appear" );
+						}
+					}
+				);
+
+				it(
+					"resolves the plan through the account when the app has no override",
+					() => {
+						var apps = variables.accounts.getApps( variables.DEV_ACCOUNT );
+						var devApp = "";
+						for ( var row in apps ) {
+							if ( row.appId == variables.DEV_APP ) {
+								devApp = row.planName;
+							}
+						}
+
+						expect( devApp ).toBe( "Business" );
+					}
+				);
+
+				it(
+					"returns nothing for an account with no apps",
+					() => {
+						expect( variables.accounts.getApps( "ee000000000000000000000000000009" ).recordCount ).toBe( 0 );
+					}
+				);
+			}
+		);
 
 		/**
 		 * Every dashboard read is scoped by account_id. These are the checks that
 		 * stop a guessed app id exposing another tenant's keys.
 		 */
-		describe( "getApp() tenant scoping", () => {
+		describe(
+			"getApp() tenant scoping",
+			() => {
+				it(
+					"returns the app for its owner",
+					() => {
+						var found = variables.accounts.getApp( variables.DEV_ACCOUNT, variables.DEV_APP );
 
-			it( "returns the app for its owner", () => {
-				var found = variables.accounts.getApp( variables.DEV_ACCOUNT, variables.DEV_APP );
-
-				expect( found ).notToBeEmpty();
-				expect( found.app_key ).toBe( "devkey123" );
-			} );
-
-			it( "returns empty for another account's app", () => {
-				expect( variables.accounts.getApp( variables.DEV_ACCOUNT, variables.OTHER_APP ) ).toBeEmpty();
-				expect( variables.accounts.getApp( variables.OTHER_ACCOUNT, variables.DEV_APP ) ).toBeEmpty();
-			} );
-
-			it( "returns empty for a malformed app id", () => {
-				expect( variables.accounts.getApp( variables.DEV_ACCOUNT, "not-a-valid-id" ) ).toBeEmpty();
-				expect( variables.accounts.getApp( variables.DEV_ACCOUNT, "" ) ).toBeEmpty();
-			} );
-
-		} );
-
-		describe( "getUsageSeries()", () => {
-
-			it( "returns one zero-filled point per day", () => {
-				var series = variables.accounts.getUsageSeries( variables.DEV_ACCOUNT, variables.DEV_APP, 14 );
-
-				expect( series.len() ).toBe( 14 );
-				expect( series[ 1 ] ).toHaveKey( "date" );
-				expect( series[ 1 ] ).toHaveKey( "messages" );
-				expect( series[ 1 ] ).toHaveKey( "connections" );
-			} );
-
-			it( "ends on today, oldest first", () => {
-				var series = variables.accounts.getUsageSeries( variables.DEV_ACCOUNT, variables.DEV_APP, 7 );
-
-				expect( series[ 7 ].date ).toBe( dateFormat( now(), "yyyy-mm-dd" ) );
-				expect( series[ 1 ].date ).toBe( dateFormat( dateAdd( "d", -6, now() ), "yyyy-mm-dd" ) );
-			} );
-
-			it( "is empty for another account's app", () => {
-				expect( variables.accounts.getUsageSeries( variables.DEV_ACCOUNT, "not-hex" ) ).toBeEmpty();
-			} );
-
-		} );
-
-		describe( "auth rule management", () => {
-
-			it( "adds, lists and deletes a rule scoped to the owner", () => {
-				var before = variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP ).len();
-
-				variables.accounts.addAuthRule(
-					variables.DEV_ACCOUNT, variables.DEV_APP,
-					"private-spec-*", "private", "https://example.com/auth"
+						expect( found ).notToBeEmpty();
+						expect( found.app_key ).toBe( "devkey123" );
+					}
 				);
 
-				var rules = variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP );
-				expect( rules.len() ).toBe( before + 1 );
-
-				var added = rules.filter( ( r ) => r.channelPattern == "private-spec-*" );
-				expect( added.len() ).toBe( 1 );
-				expect( added[ 1 ].ruleType ).toBe( "private" );
-				expect( added[ 1 ].authWebhookUrl ).toBe( "https://example.com/auth" );
-
-				variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, added[ 1 ].ruleId );
-				expect( variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP ).len() ).toBe( before );
-			} );
-
-			it( "refuses to add a rule to another account's app", () => {
-				var before = variables.accounts.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP ).len();
-
-				variables.accounts.addAuthRule(
-					variables.DEV_ACCOUNT, variables.OTHER_APP,
-					"private-sneaky-*", "private", "https://evil.example.com/auth"
+				it(
+					"returns empty for another account's app",
+					() => {
+						expect( variables.accounts.getApp( variables.DEV_ACCOUNT, variables.OTHER_APP ) ).toBeEmpty();
+						expect( variables.accounts.getApp( variables.OTHER_ACCOUNT, variables.DEV_APP ) ).toBeEmpty();
+					}
 				);
 
-				expect( variables.accounts.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP ).len() )
-					.toBe( before, "a rule must not be attachable to an app you do not own" );
-			} );
-
-			/**
-			 * (app_id, channel_pattern) is unique. Two rows with the same pattern
-			 * could authorize differently from one request to the next.
-			 */
-			it( "updates an existing pattern instead of duplicating it", () => {
-				variables.accounts.addAuthRule(
-					variables.DEV_ACCOUNT, variables.DEV_APP,
-					"private-upsert-*", "private", "https://first.example.com/auth"
+				it(
+					"returns empty for a malformed app id",
+					() => {
+						expect( variables.accounts.getApp( variables.DEV_ACCOUNT, "not-a-valid-id" ) ).toBeEmpty();
+						expect( variables.accounts.getApp( variables.DEV_ACCOUNT, "" ) ).toBeEmpty();
+					}
 				);
-				variables.accounts.addAuthRule(
-					variables.DEV_ACCOUNT, variables.DEV_APP,
-					"private-upsert-*", "presence", "https://second.example.com/auth"
+			}
+		);
+
+		describe(
+			"getUsageSeries()",
+			() => {
+				it(
+					"returns one zero-filled point per day",
+					() => {
+						var series = variables.accounts.getUsageSeries(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								14
+							);
+
+						expect( series.len() ).toBe( 14 );
+						expect( series[ 1 ] ).toHaveKey( "date" );
+						expect( series[ 1 ] ).toHaveKey( "messages" );
+						expect( series[ 1 ] ).toHaveKey( "connections" );
+					}
 				);
 
-				var matching = variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
-					.filter( ( r ) => r.channelPattern == "private-upsert-*" );
+				it(
+					"ends on today, oldest first",
+					() => {
+						var series = variables.accounts.getUsageSeries(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								7
+							);
 
-				expect( matching.len() ).toBe( 1, "the unique key must prevent a second row" );
-				expect( matching[ 1 ].authWebhookUrl ).toBe( "https://second.example.com/auth" );
-				expect( matching[ 1 ].ruleType ).toBe( "presence" );
+						expect( series[ 7 ].date ).toBe( dateFormat( now(), "yyyy-mm-dd" ) );
+						expect( series[ 1 ].date ).toBe( dateFormat( dateAdd(
+										"d",
+										-6,
+										now()
+									),
+									"yyyy-mm-dd" ) );
+					}
+				);
 
-				variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, matching[ 1 ].ruleId );
-			} );
+				it(
+					"is empty for another account's app",
+					() => {
+						expect( variables.accounts.getUsageSeries( variables.DEV_ACCOUNT, "not-hex" ) ).toBeEmpty();
+					}
+				);
+			}
+		);
 
-			it( "rejects a duplicate pattern at the database level", () => {
-				expect( () => queryExecute(
-					"INSERT INTO channel_auth_rules (id, app_id, channel_pattern, rule_type)
+		describe(
+			"auth rule management",
+			() => {
+				it(
+					"adds, lists and deletes a rule scoped to the owner",
+					() => {
+						var before = variables
+							.accounts
+							.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
+							.len();
+
+						variables.accounts.addAuthRule(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								"private-spec-*",
+								"private",
+								"https://example.com/auth"
+							);
+
+						var rules = variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP );
+						expect( rules.len() ).toBe( before + 1 );
+
+						var added = rules.filter( ( r ) => r.channelPattern == "private-spec-*" );
+						expect( added.len() ).toBe( 1 );
+						expect( added[ 1 ].ruleType ).toBe( "private" );
+						expect( added[ 1 ].authWebhookUrl ).toBe( "https://example.com/auth" );
+
+						variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, added[ 1 ].ruleId );
+						expect( variables
+								.accounts
+								.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
+								.len() ).toBe( before );
+					}
+				);
+
+				it(
+					"refuses to add a rule to another account's app",
+					() => {
+						var before = variables
+							.accounts
+							.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
+							.len();
+
+						variables.accounts.addAuthRule(
+								variables.DEV_ACCOUNT,
+								variables.OTHER_APP,
+								"private-sneaky-*",
+								"private",
+								"https://evil.example.com/auth"
+							);
+
+						expect( variables
+								.accounts
+								.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
+								.len() ).toBe(
+								before,
+								"a rule must not be attachable to an app you do not own"
+							);
+					}
+				);
+
+				/**
+				 * (app_id, channel_pattern) is unique. Two rows with the same pattern
+				 * could authorize differently from one request to the next.
+				 */
+				it(
+					"updates an existing pattern instead of duplicating it",
+					() => {
+						variables.accounts.addAuthRule(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								"private-upsert-*",
+								"private",
+								"https://first.example.com/auth"
+							);
+						variables.accounts.addAuthRule(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								"private-upsert-*",
+								"presence",
+								"https://second.example.com/auth"
+							);
+
+						var matching = variables
+							.accounts
+							.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
+							.filter( ( r ) => r.channelPattern == "private-upsert-*" );
+
+						expect( matching.len() ).toBe( 1, "the unique key must prevent a second row" );
+						expect( matching[ 1 ].authWebhookUrl ).toBe( "https://second.example.com/auth" );
+						expect( matching[ 1 ].ruleType ).toBe( "presence" );
+
+						variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, matching[ 1 ].ruleId );
+					}
+				);
+
+				it(
+					"rejects a duplicate pattern at the database level",
+					() => {
+						expect(
+							() => queryExecute(
+								"INSERT INTO channel_auth_rules (id, app_id, channel_pattern, rule_type)
 					 VALUES (UNHEX(REPLACE(UUID(),'-','')), UNHEX(:app), 'private-*', 'private')",
-					{ app : variables.DEV_APP },
-					{ datasource : "pulsely" }
-				) ).toThrow( regex = ".*[Dd]uplicate.*" );
-			} );
-
-			it( "allows the same pattern for different apps", () => {
-				variables.accounts.addAuthRule(
-					variables.DEV_ACCOUNT, variables.DEV_APP, "private-shared-*", "private", ""
-				);
-				variables.accounts.addAuthRule(
-					variables.OTHER_ACCOUNT, variables.OTHER_APP, "private-shared-*", "private", ""
+								{ app: variables.DEV_APP },
+								{ datasource: "pulsely" }
+							)
+						).toThrow( regex = ".*[Dd]uplicate.*" );
+					}
 				);
 
-				var mine = variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
-					.filter( ( r ) => r.channelPattern == "private-shared-*" );
-				var theirs = variables.accounts.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
-					.filter( ( r ) => r.channelPattern == "private-shared-*" );
+				it(
+					"allows the same pattern for different apps",
+					() => {
+						variables.accounts.addAuthRule(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								"private-shared-*",
+								"private",
+								""
+							);
+						variables.accounts.addAuthRule(
+								variables.OTHER_ACCOUNT,
+								variables.OTHER_APP,
+								"private-shared-*",
+								"private",
+								""
+							);
 
-				expect( mine.len() ).toBe( 1 );
-				expect( theirs.len() ).toBe( 1 );
+						var mine = variables
+							.accounts
+							.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
+							.filter( ( r ) => r.channelPattern == "private-shared-*" );
+						var theirs = variables
+							.accounts
+							.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
+							.filter( ( r ) => r.channelPattern == "private-shared-*" );
 
-				variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, mine[ 1 ].ruleId );
-				variables.accounts.deleteAuthRule( variables.OTHER_ACCOUNT, theirs[ 1 ].ruleId );
-			} );
+						expect( mine.len() ).toBe( 1 );
+						expect( theirs.len() ).toBe( 1 );
 
-			it( "coerces an unknown rule type to private", () => {
-				variables.accounts.addAuthRule(
-					variables.DEV_ACCOUNT, variables.DEV_APP, "private-coerce-*", "wildcard-nonsense", ""
+						variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, mine[ 1 ].ruleId );
+						variables.accounts.deleteAuthRule( variables.OTHER_ACCOUNT, theirs[ 1 ].ruleId );
+					}
 				);
 
-				var added = variables.accounts.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
-					.filter( ( r ) => r.channelPattern == "private-coerce-*" );
+				it(
+					"coerces an unknown rule type to private",
+					() => {
+						variables.accounts.addAuthRule(
+								variables.DEV_ACCOUNT,
+								variables.DEV_APP,
+								"private-coerce-*",
+								"wildcard-nonsense",
+								""
+							);
 
-				expect( added[ 1 ].ruleType ).toBe( "private" );
-				variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, added[ 1 ].ruleId );
-			} );
+						var added = variables
+							.accounts
+							.getAuthRules( variables.DEV_ACCOUNT, variables.DEV_APP )
+							.filter( ( r ) => r.channelPattern == "private-coerce-*" );
 
-			it( "refuses to delete another account's rule", () => {
-				variables.accounts.addAuthRule(
-					variables.OTHER_ACCOUNT, variables.OTHER_APP, "private-victim-*", "private", ""
+						expect( added[ 1 ].ruleType ).toBe( "private" );
+						variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, added[ 1 ].ruleId );
+					}
 				);
-				var victim = variables.accounts.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
-					.filter( ( r ) => r.channelPattern == "private-victim-*" );
 
-				variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, victim[ 1 ].ruleId );
+				it(
+					"refuses to delete another account's rule",
+					() => {
+						variables.accounts.addAuthRule(
+								variables.OTHER_ACCOUNT,
+								variables.OTHER_APP,
+								"private-victim-*",
+								"private",
+								""
+							);
+						var victim = variables
+							.accounts
+							.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
+							.filter( ( r ) => r.channelPattern == "private-victim-*" );
 
-				expect( variables.accounts.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
-					.filter( ( r ) => r.channelPattern == "private-victim-*" ).len() )
-					.toBe( 1, "deleting across tenants must be a no-op" );
+						variables.accounts.deleteAuthRule( variables.DEV_ACCOUNT, victim[ 1 ].ruleId );
 
-				variables.accounts.deleteAuthRule( variables.OTHER_ACCOUNT, victim[ 1 ].ruleId );
-			} );
+						expect( variables
+								.accounts
+								.getAuthRules( variables.OTHER_ACCOUNT, variables.OTHER_APP )
+								.filter( ( r ) => r.channelPattern == "private-victim-*" )
+								.len() ).toBe( 1, "deleting across tenants must be a no-op" );
 
-		} );
-
-		describe( "createApp()", () => {
-
-			it( "mints an app with usable credentials and cleans up", () => {
-				var appId = variables.accounts.createApp( variables.DEV_ACCOUNT, "Spec Created App" );
-
-				expect( appId ).toMatch( "^[0-9a-f]{32}$" );
-
-				var created = variables.accounts.getApp( variables.DEV_ACCOUNT, appId );
-				expect( created ).notToBeEmpty();
-				expect( created.name ).toBe( "Spec Created App" );
-				expect( created.app_key ).toMatch( "^bp_[0-9a-f]{24}$" );
-				expect( len( created.app_secret ) ).toBe( 64 );
-
-				queryExecute(
-					"DELETE FROM apps WHERE id = UNHEX(:app)",
-					{ app : appId },
-					{ datasource : "pulsely" }
+						variables.accounts.deleteAuthRule( variables.OTHER_ACCOUNT, victim[ 1 ].ruleId );
+					}
 				);
-			} );
+			}
+		);
 
-			it( "gives two apps different keys and secrets", () => {
-				var first  = variables.accounts.createApp( variables.DEV_ACCOUNT, "Spec App A" );
-				var second = variables.accounts.createApp( variables.DEV_ACCOUNT, "Spec App B" );
+		describe(
+			"createApp()",
+			() => {
+				it(
+					"mints an app with usable credentials and cleans up",
+					() => {
+						var appId = variables.accounts.createApp( variables.DEV_ACCOUNT, "Spec Created App" );
 
-				var a = variables.accounts.getApp( variables.DEV_ACCOUNT, first );
-				var b = variables.accounts.getApp( variables.DEV_ACCOUNT, second );
+						expect( appId ).toMatch( "^[0-9a-f]{32}$" );
 
-				expect( a.app_key ).notToBe( b.app_key );
-				expect( a.app_secret ).notToBe( b.app_secret );
+						var created = variables.accounts.getApp( variables.DEV_ACCOUNT, appId );
+						expect( created ).notToBeEmpty();
+						expect( created.name ).toBe( "Spec Created App" );
+						expect( created.app_key ).toMatch( "^bp_[0-9a-f]{24}$" );
+						expect( len( created.app_secret ) ).toBe( 64 );
 
-				queryExecute(
-					"DELETE FROM apps WHERE id IN (UNHEX(:a), UNHEX(:b))",
-					{ a : first, b : second },
-					{ datasource : "pulsely" }
+						queryExecute(
+							"DELETE FROM apps WHERE id = UNHEX(:app)",
+							{ app: appId },
+							{ datasource: "pulsely" }
+						);
+					}
 				);
-			} );
 
-		} );
+				it(
+					"gives two apps different keys and secrets",
+					() => {
+						var first = variables.accounts.createApp( variables.DEV_ACCOUNT, "Spec App A" );
+						var second = variables.accounts.createApp( variables.DEV_ACCOUNT, "Spec App B" );
 
+						var a = variables.accounts.getApp( variables.DEV_ACCOUNT, first );
+						var b = variables.accounts.getApp( variables.DEV_ACCOUNT, second );
+
+						expect( a.app_key ).notToBe( b.app_key );
+						expect( a.app_secret ).notToBe( b.app_secret );
+
+						queryExecute(
+							"DELETE FROM apps WHERE id IN (UNHEX(:a), UNHEX(:b))",
+							{ a: first, b: second },
+							{ datasource: "pulsely" }
+						);
+					}
+				);
+			}
+		);
 	}
-
 }

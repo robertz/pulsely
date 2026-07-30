@@ -10,9 +10,7 @@
  * code they already have.
  */
 class singleton {
-
 	property name="signatureService" inject="SignatureService";
-
 	variables.DSN = "pulsely";
 	variables.MAX_ATTEMPTS = 5;
 	variables.TIMEOUT_SECONDS = 5;
@@ -22,15 +20,9 @@ class singleton {
 	// Retry delays in seconds, indexed by attempt number. Deliberately front-loaded:
 	// most failures are a brief blip, and a customer redeploying should not wait an
 	// hour for the backlog.
-	variables.BACKOFF_SECONDS = [ 10, 60, 300, 1800 ];
+	variables.BACKOFF_SECONDS = [ 10, 60, 300, 1800];
 
-	variables.EVENT_TYPES = [
-		"channel_occupied",
-		"channel_vacated",
-		"member_added",
-		"member_removed",
-		"client_event"
-	];
+	variables.EVENT_TYPES = [ "channel_occupied", "channel_vacated", "member_added", "member_removed", "client_event"];
 
 	function init() {
 		return this;
@@ -52,45 +44,59 @@ class singleton {
 			 FROM   app_webhooks
 			 WHERE  app_id = UNHEX(:appId)
 			 ORDER BY created_at ASC",
-			{ appId : { value : appId, type : "varchar" } },
-			{ datasource : variables.DSN }
+			{ appId: { value: appId, type: "varchar" } },
+			{ datasource: variables.DSN }
 		);
 
-		return rows.reduce( ( acc, row ) => {
-			acc.append( {
-				"webhookId" : row.webhookId,
-				"url"       : row.url,
-				"events"    : row.events.len() ? row.events.listToArray() : [],
-				"isActive"  : isBoolean( row.is_active ) && row.is_active
-			} );
-			return acc;
-		}, [] );
+		return rows.reduce(
+				( acc, row ) => {
+					acc.append(
+							{
+								"webhookId": row.webhookId,
+								"url"      : row.url,
+								"events"   : row.events.len() ? row.events.listToArray() : [],
+								"isActive" : isBoolean( row.is_active ) && row.is_active
+							}
+						);
+					return acc;
+				},
+				[]
+			);
 	}
 
-	function addWebhook( required string appId, required string endpointUrl, array events = [] ) {
-		var wanted = events.filter( ( candidate ) => variables.EVENT_TYPES.findNoCase( candidate ) > 0 );
+	function addWebhook(
+		required string appId,
+		required string endpointUrl,
+		array events = []
+	) {
+		var wanted = events.filter(
+				( candidate ) => variables.EVENT_TYPES.findNoCase( candidate ) > 0
+			);
 
 		queryExecute(
 			"INSERT INTO app_webhooks (id, app_id, url, events)
 			 VALUES (UNHEX(REPLACE(UUID(),'-','')), UNHEX(:appId), :url, :events)
 			 ON DUPLICATE KEY UPDATE events = VALUES(events), is_active = 1",
 			{
-				appId  : { value : appId, type : "varchar" },
-				url    : { value : trim( endpointUrl ), type : "varchar" },
-				events : { value : wanted.toList(), type : "varchar" }
+				appId : { value: appId, type: "varchar" },
+				url   : { value: trim( endpointUrl ), type: "varchar" },
+				events: { value: wanted.toList(), type: "varchar" }
 			},
-			{ datasource : variables.DSN }
+			{ datasource: variables.DSN }
 		);
 	}
 
-	function deleteWebhook( required string appId, required string webhookId ) {
+	function deleteWebhook(
+		required string appId,
+		required string webhookId
+	) {
 		queryExecute(
 			"DELETE FROM app_webhooks WHERE id = UNHEX(:webhookId) AND app_id = UNHEX(:appId)",
 			{
-				webhookId : { value : webhookId, type : "varchar" },
-				appId     : { value : appId, type : "varchar" }
+				webhookId: { value: webhookId, type: "varchar" },
+				appId    : { value: appId, type: "varchar" }
 			},
-			{ datasource : variables.DSN }
+			{ datasource: variables.DSN }
 		);
 	}
 
@@ -102,25 +108,31 @@ class singleton {
 	 * Returns quietly when nobody subscribed, so callers can fire events without
 	 * checking first.
 	 */
-	numeric function enqueue( required string appId, required string eventType, required struct data ) {
+	numeric function enqueue(
+		required string appId,
+		required string eventType,
+		required struct data
+	) {
 		var subscribers = queryExecute(
 			"SELECT LOWER(HEX(id)) AS webhookId, events
 			 FROM   app_webhooks
 			 WHERE  app_id = UNHEX(:appId) AND is_active = 1",
-			{ appId : { value : appId, type : "varchar" } },
-			{ datasource : variables.DSN }
+			{ appId: { value: appId, type: "varchar" } },
+			{ datasource: variables.DSN }
 		);
 
 		if ( !subscribers.recordCount ) {
 			return 0;
 		}
 
-		var payload = jsonSerialize( {
-			"event"      : eventType,
-			"data"       : data,
-			"app_id"     : appId,
-			"created_at" : dateTimeFormat( now(), "yyyy-mm-dd'T'HH:nn:ss" )
-		} );
+		var payload = jsonSerialize(
+			{
+				"event"     : eventType,
+				"data"      : data,
+				"app_id"    : appId,
+				"created_at": dateTimeFormat( now(), "yyyy-mm-dd'T'HH:nn:ss" )
+			}
+		);
 
 		var queued = 0;
 		for ( var row in subscribers ) {
@@ -133,12 +145,12 @@ class singleton {
 				"INSERT INTO webhook_deliveries (id, webhook_id, app_id, event_type, payload, next_attempt_at)
 				 VALUES (UNHEX(REPLACE(UUID(),'-','')), UNHEX(:webhookId), UNHEX(:appId), :eventType, :payload, NOW())",
 				{
-					webhookId : { value : row.webhookId, type : "varchar" },
-					appId     : { value : appId, type : "varchar" },
-					eventType : { value : eventType, type : "varchar" },
-					payload   : { value : payload, type : "varchar" }
+					webhookId: { value: row.webhookId, type: "varchar" },
+					appId    : { value: appId, type: "varchar" },
+					eventType: { value: eventType, type: "varchar" },
+					payload  : { value: payload, type: "varchar" }
 				},
-				{ datasource : variables.DSN }
+				{ datasource: variables.DSN }
 			);
 			queued++;
 		}
@@ -165,26 +177,83 @@ class singleton {
 			   AND  d.next_attempt_at <= NOW()
 			 ORDER BY d.next_attempt_at ASC
 			 LIMIT  :maxRows",
-			{ maxRows : { value : limit, type : "integer" } },
-			{ datasource : variables.DSN }
+			{ maxRows: { value: limit, type: "integer" } },
+			{ datasource: variables.DSN }
 		);
 
-		var report = { attempted : 0, delivered : 0, failed : 0 };
+		var report = { attempted: 0, delivered: 0, failed: 0 };
 
 		for ( var row in due ) {
 			report.attempted++;
-			var result = post( row.url, row.app_secret, row.payload );
+			var result = post(
+				row.url,
+				row.app_secret,
+				row.payload
+			);
 
 			if ( result.ok ) {
 				markDelivered( row.deliveryId, result.status );
 				report.delivered++;
 			} else {
-				markFailed( row.deliveryId, row.attempts + 1, result.status, result.error );
+				markFailed(
+					row.deliveryId,
+					row.attempts + 1,
+					result.status,
+					result.error
+				);
 				report.failed++;
 			}
 		}
 
 		return report;
+	}
+
+	/* ------------------------------------------------------------ reporting */
+
+	array function getRecentDeliveries( required string appId, numeric limit = 20 ) {
+		var rows = queryExecute(
+			"SELECT event_type, attempts, last_status, last_error, delivered_at, created_at
+			 FROM   webhook_deliveries
+			 WHERE  app_id = UNHEX(:appId)
+			 ORDER BY created_at DESC
+			 LIMIT  :maxRows",
+			{
+				appId  : { value: appId, type: "varchar" },
+				maxRows: { value: limit, type: "integer" }
+			},
+			{ datasource: variables.DSN }
+		);
+
+		return rows.reduce(
+				( acc, row ) => {
+					acc.append(
+							{
+								"eventType" : row.event_type,
+								"attempts"  : row.attempts,
+								"lastStatus": row.last_status ?: 0,
+								"lastError" : row.last_error ?: "",
+								"delivered" : !isNull( row.delivered_at ),
+								"createdAt" : dateTimeFormat( row.created_at, "HH:nn:ss" )
+							}
+						);
+					return acc;
+				},
+				[]
+			);
+	}
+
+	/**
+	 * Drop delivered rows past their useful life so the queue table stays small.
+	 */
+	numeric function purgeDelivered( numeric olderThanHours = 24 ) {
+		queryExecute(
+			"DELETE FROM webhook_deliveries
+			 WHERE delivered_at IS NOT NULL
+			   AND delivered_at < DATE_SUB(NOW(), INTERVAL :hours HOUR)",
+			{ hours: { value: olderThanHours, type: "integer" } },
+			{ datasource: variables.DSN, result: "local.purgeResult" }
+		);
+		return local.purgeResult.recordCount ?: 0;
 	}
 
 	/**
@@ -193,41 +262,59 @@ class singleton {
 	 * The signature covers the same four lines as the trigger API — method, path,
 	 * timestamp, body hash — so customers verify it with the SDK they already have.
 	 */
-	private struct function post( required string endpointUrl, required string appSecret, required string payload ) {
+	private struct function post(
+		required string endpointUrl,
+		required string appSecret,
+		required string payload
+	) {
 		var timestamp = int( getTickCount() / 1000 );
-		var signature = signatureService.sign( appSecret, "POST", variables.WEBHOOK_PATH, timestamp, payload );
+		var signature = signatureService.sign(
+				appSecret,
+				"POST",
+				variables.WEBHOOK_PATH,
+				timestamp,
+				payload
+			);
 
 		try {
-			bx:http url=endpointUrl method="POST" timeout=variables.TIMEOUT_SECONDS
-				throwOnError="false" result="local.response" {
-				bx:httpparam type="header" name="Content-Type" value="application/json";
-				bx:httpparam type="header" name="X-Pulsely-Timestamp" value="#timestamp#";
-				bx:httpparam type="header" name="X-Pulsely-Signature" value="#signature#";
-				bx:httpparam type="body" value="#payload#";
+			bx:http
+				url         ="#endpointUrl#"
+				method      ="POST"
+				timeout     ="#variables.TIMEOUT_SECONDS#"
+				throwOnError="false"
+				result      ="local.response"
+			{
+				bx:httpparam type ="header" name ="Content-Type" value="application/json";
+				bx:httpparam type ="header" name ="X-Pulsely-Timestamp" value="#timestamp#";
+				bx:httpparam type ="header" name ="X-Pulsely-Signature" value="#signature#";
+				bx:httpparam type ="body" value="#payload#";
 			}
 
 			var status = val( local.response.status_code ?: 0 );
 			return {
-				ok     : status >= 200 && status <= 299,
-				status : status,
-				error  : status >= 200 && status <= 299 ? "" : left( local.response.status_text ?: "non-2xx", 200 )
+				ok    : status >= 200 && status <= 299,
+				status: status,
+				error : status >= 200 && status <= 299 ? "" : left( local.response.status_text ?: "non-2xx", 200 )
 			};
-		} catch ( any e ) {
-			return { ok : false, status : 0, error : left( e.message, 200 ) };
+		} catch (any e) {
+			return { ok: false, status: 0, error: left( e.message, 200 ) };
 		}
 	}
 
-	private function markDelivered( required string deliveryId, required numeric status ) {
+	private function markDelivered(
+		required string deliveryId,
+		required numeric status
+	) {
 		queryExecute(
 			"UPDATE webhook_deliveries
 			 SET    delivered_at = NOW(), next_attempt_at = NULL,
 			        attempts = attempts + 1, last_status = :status, last_error = NULL
 			 WHERE  id = UNHEX(:deliveryId)",
 			{
-				deliveryId : { value : deliveryId, type : "varchar" },
-				status     : { value : status, type : "integer" }
+				deliveryId: { value: deliveryId, type: "varchar" },
+				status    : { value: status, type: "integer" }
 			},
-			{ datasource : variables.DSN }
+			{ datasource: variables.DSN }
 		);
 	}
 
@@ -243,10 +330,10 @@ class singleton {
 		required string error
 	) {
 		var common = {
-			deliveryId : { value : deliveryId, type : "varchar" },
-			attempts   : { value : attempts, type : "integer" },
-			status     : { value : status, type : "integer" },
-			error      : { value : error, type : "varchar" }
+			deliveryId: { value: deliveryId, type: "varchar" },
+			attempts  : { value: attempts, type: "integer" },
+			status    : { value: status, type: "integer" },
+			error     : { value: error, type: "varchar" }
 		};
 
 		// Out of attempts: stop selecting the row, but keep it for debugging.
@@ -257,15 +344,15 @@ class singleton {
 				        last_error = :error, next_attempt_at = NULL
 				 WHERE  id = UNHEX(:deliveryId)",
 				common,
-				{ datasource : variables.DSN }
+				{ datasource: variables.DSN }
 			);
 			return;
 		}
 
 		var params = common;
 		params.delay = {
-			value : variables.BACKOFF_SECONDS[ min( attempts, variables.BACKOFF_SECONDS.len() ) ],
-			type  : "integer"
+			value: variables.BACKOFF_SECONDS[ min( attempts, variables.BACKOFF_SECONDS.len() ) ],
+			type : "integer"
 		};
 
 		queryExecute(
@@ -274,51 +361,7 @@ class singleton {
 			        next_attempt_at = DATE_ADD(NOW(), INTERVAL :delay SECOND)
 			 WHERE  id = UNHEX(:deliveryId)",
 			params,
-			{ datasource : variables.DSN }
+			{ datasource: variables.DSN }
 		);
 	}
-
-	/* ------------------------------------------------------------ reporting */
-
-	array function getRecentDeliveries( required string appId, numeric limit = 20 ) {
-		var rows = queryExecute(
-			"SELECT event_type, attempts, last_status, last_error, delivered_at, created_at
-			 FROM   webhook_deliveries
-			 WHERE  app_id = UNHEX(:appId)
-			 ORDER BY created_at DESC
-			 LIMIT  :maxRows",
-			{
-				appId   : { value : appId, type : "varchar" },
-				maxRows : { value : limit, type : "integer" }
-			},
-			{ datasource : variables.DSN }
-		);
-
-		return rows.reduce( ( acc, row ) => {
-			acc.append( {
-				"eventType"  : row.event_type,
-				"attempts"   : row.attempts,
-				"lastStatus" : row.last_status ?: 0,
-				"lastError"  : row.last_error ?: "",
-				"delivered"  : !isNull( row.delivered_at ),
-				"createdAt"  : dateTimeFormat( row.created_at, "HH:nn:ss" )
-			} );
-			return acc;
-		}, [] );
-	}
-
-	/**
-	 * Drop delivered rows past their useful life so the queue table stays small.
-	 */
-	numeric function purgeDelivered( numeric olderThanHours = 24 ) {
-		queryExecute(
-			"DELETE FROM webhook_deliveries
-			 WHERE delivered_at IS NOT NULL
-			   AND delivered_at < DATE_SUB(NOW(), INTERVAL :hours HOUR)",
-			{ hours : { value : olderThanHours, type : "integer" } },
-			{ datasource : variables.DSN, result : "local.purgeResult" }
-		);
-		return local.purgeResult.recordCount ?: 0;
-	}
-
 }

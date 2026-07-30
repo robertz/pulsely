@@ -3,7 +3,6 @@
  * allows_message_history = 1, bounded by the plan's history_retention_hours.
  */
 class singleton {
-
 	variables.DSN = "pulsely";
 	variables.REPLAY_LIMIT = 50;
 
@@ -21,12 +20,12 @@ class singleton {
 			"INSERT INTO channel_messages (id, app_id, channel_name, event_name, payload)
 			 VALUES (UNHEX(REPLACE(UUID(), '-', '')), UNHEX(:appId), :channelName, :eventName, :payload)",
 			{
-				appId       : { value : appId, type : "varchar" },
-				channelName : { value : channelName, type : "varchar" },
-				eventName   : { value : eventName, type : "varchar" },
-				payload     : { value : payloadJSON, type : "varchar" }
+				appId      : { value: appId, type: "varchar" },
+				channelName: { value: channelName, type: "varchar" },
+				eventName  : { value: eventName, type: "varchar" },
+				payload    : { value: payloadJSON, type: "varchar" }
 			},
-			{ datasource : variables.DSN }
+			{ datasource: variables.DSN }
 		);
 	}
 
@@ -56,23 +55,28 @@ class singleton {
 			 ) recent
 			 ORDER BY created_at ASC",
 			{
-				appId          : { value : appId, type : "varchar" },
-				channelName    : { value : channelName, type : "varchar" },
-				retentionHours : { value : retentionHours, type : "integer" },
-				maxRows        : { value : limit, type : "integer" }
+				appId         : { value: appId, type: "varchar" },
+				channelName   : { value: channelName, type: "varchar" },
+				retentionHours: { value: retentionHours, type: "integer" },
+				maxRows       : { value: limit, type: "integer" }
 			},
-			{ datasource : variables.DSN }
+			{ datasource: variables.DSN }
 		);
 
-		return result.reduce( ( acc, row ) => {
-			acc.append( {
-				"event"      : row.event_name,
-				"data"       : isJSON( row.payload ) ? jsonDeserialize( row.payload ) : row.payload,
-				"created_at" : dateTimeFormat( row.created_at, "yyyy-mm-dd'T'HH:nn:ss.lll" ),
-				"replayed"   : true
-			} );
-			return acc;
-		}, [] );
+		return result.reduce(
+				( acc, row ) => {
+					acc.append(
+							{
+								"event"     : row.event_name,
+								"data"      : isJSON( row.payload ) ? jsonDeserialize( row.payload ) : row.payload,
+								"created_at": dateTimeFormat( row.created_at, "yyyy-mm-dd'T'HH:nn:ss.lll" ),
+								"replayed"  : true
+							}
+						);
+					return acc;
+				},
+				[]
+			);
 	}
 
 	/**
@@ -87,9 +91,8 @@ class singleton {
 			 LEFT JOIN plans p ON p.id = COALESCE(a.plan_id, acc.plan_id)
 			 WHERE cm.created_at < DATE_SUB(NOW(3), INTERVAL COALESCE(p.history_retention_hours, 0) HOUR)",
 			{},
-			{ datasource : variables.DSN, result : "local.purgeResult" }
+			{ datasource: variables.DSN, result: "local.purgeResult" }
 		);
 		return local.purgeResult.recordCount ?: 0;
 	}
-
 }

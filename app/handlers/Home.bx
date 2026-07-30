@@ -2,7 +2,6 @@
  * Public marketing surface. Everything here is reachable without a session.
  */
 class {
-
 	property name="planService" inject="PlanService";
 
 	function index( event, rc, prc ) {
@@ -10,5 +9,4 @@ class {
 		prc.plans = planService.getPublicPlans();
 		event.setView( view = "home/index", layout = "Marketing" );
 	}
-
 }

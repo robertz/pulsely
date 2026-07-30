@@ -22,7 +22,7 @@
 
 			<div class="header-cta">
 				<bx:output>
-					<bx:if structKeyExists( prc, "account" ) and not prc.account.isEmpty()>
+					<bx:if structKeyExists( prc, "account" ) && !prc.account.isEmpty()>
 						<a class="btn btn-primary" href="/dashboard">Go to dashboard</a>
 					<bx:else>
 						<a class="btn btn-ghost btn-sm" href="/dashboard/login">Sign in</a>

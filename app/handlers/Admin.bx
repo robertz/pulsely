@@ -6,11 +6,17 @@
  * the session happens to expire.
  */
 class {
+	property name="adminService" inject="AdminService";
 
-	property name="adminService"    inject="AdminService";
 	property name="meteringService" inject="MeteringService";
 
-	function preHandler( event, rc, prc, action, eventArguments ) {
+	function preHandler(
+		event,
+		rc,
+		prc,
+		action,
+		eventArguments
+	) {
 		prc.account = session.account ?: {};
 
 		// Same fail-closed CSRF rule as the dashboard: any non-GET must carry a token.
@@ -41,8 +47,8 @@ class {
 
 	function index( event, rc, prc ) {
 		prc.accounts = adminService.listAccounts();
-		prc.plans    = adminService.listPlans();
-		prc.notice   = rc.notice ?: "";
+		prc.plans = adminService.listPlans();
+		prc.notice = rc.notice ?: "";
 		prc.adminError = rc.error ?: "";
 		event.setView( "admin/index" );
 	}
@@ -57,8 +63,8 @@ class {
 		}
 
 		prc.viewing = match[ 1 ];
-		prc.apps    = adminService.listApps( accountId );
-		prc.plans   = adminService.listPlans();
+		prc.apps = adminService.listApps( accountId );
+		prc.plans = adminService.listPlans();
 		event.setView( "admin/account" );
 	}
 
@@ -69,7 +75,7 @@ class {
 	 */
 	function monitor( event, rc, prc ) {
 		prc.totals = adminService.platformTotals();
-		prc.apps   = withLiveConnections( adminService.listAllApps() );
+		prc.apps = withLiveConnections( adminService.listAllApps() );
 		prc.totals.liveConnections = meteringService.getTotalConnections();
 		event.setView( "admin/monitor" );
 	}
@@ -80,13 +86,47 @@ class {
 	 */
 	function monitorData( event, rc, prc ) {
 		var body = {
-			"totals" : adminService.platformTotals(),
-			"apps"   : withLiveConnections( adminService.listAllApps() )
+			"totals": adminService.platformTotals(),
+			"apps"  : withLiveConnections( adminService.listAllApps() )
 		};
 		body.totals.liveConnections = meteringService.getTotalConnections();
 
-		event.getResponse().setStatusCode( 200 ).setData( body );
-		return event.renderData( type = "json", data = body, statusCode = 200 );
+		event
+			.getResponse()
+			.setStatusCode( 200 )
+			.setData( body );
+		return event.renderData(
+				type       = "json",
+				data       = body,
+				statusCode = 200
+			);
+	}
+
+	function setPlan( event, rc, prc ) {
+		var result = adminService.setPlan(
+				prc.account.accountId,
+				rc.accountId ?: "",
+				rc.planId ?: ""
+			);
+		back( result, "Plan updated." );
+	}
+
+	function setActive( event, rc, prc ) {
+		var result = adminService.setActive(
+				prc.account.accountId,
+				rc.accountId ?: "",
+				!( ( rc.active ?: "0" ) == "1" )
+			);
+		back( result, "Account updated." );
+	}
+
+	function setAdmin( event, rc, prc ) {
+		var result = adminService.setAdmin(
+				prc.account.accountId,
+				rc.accountId ?: "",
+				!( ( rc.admin ?: "0" ) == "1" )
+			);
+		back( result, "Administrator access updated." );
 	}
 
 	/**
@@ -95,40 +135,22 @@ class {
 	 */
 	private array function withLiveConnections( required array apps ) {
 		var live = meteringService.snapshotConnections();
-		return apps.map( ( app ) => {
-			var merged = duplicate( app );
-			merged.liveConnections = live.keyExists( app.appId ) ? live[ app.appId ] : 0;
-			return merged;
-		} );
-	}
-
-	function setPlan( event, rc, prc ) {
-		var result = adminService.setPlan( prc.account.accountId, rc.accountId ?: "", rc.planId ?: "" );
-		back( result, "Plan updated." );
-	}
-
-	function setActive( event, rc, prc ) {
-		var result = adminService.setActive(
-			prc.account.accountId,
-			rc.accountId ?: "",
-			!( ( rc.active ?: "0" ) == "1" )
-		);
-		back( result, "Account updated." );
-	}
-
-	function setAdmin( event, rc, prc ) {
-		var result = adminService.setAdmin(
-			prc.account.accountId,
-			rc.accountId ?: "",
-			!( ( rc.admin ?: "0" ) == "1" )
-		);
-		back( result, "Administrator access updated." );
+		return apps.map(
+				( app ) => {
+					var merged = duplicate( app );
+					merged.liveConnections = live.keyExists( app.appId ) ? live[ app.appId ] : 0;
+					return merged;
+				}
+			);
 	}
 
 	/**
 	 * Refusals carry their reason back to the console rather than failing silently.
 	 */
-	private function back( required struct result, required string successMessage ) {
+	private function back(
+		required struct result,
+		required string successMessage
+	) {
 		relocate(
 			url         = "/admin",
 			queryString = result.ok
@@ -136,5 +158,4 @@ class {
 				: "error=" & encodeForURL( result.error )
 		);
 	}
-
 }

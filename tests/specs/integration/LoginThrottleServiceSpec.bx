@@ -4,146 +4,181 @@ class extends="testbox.system.BaseSpec" {
 		variables.throttle = new app.models.LoginThrottleService();
 	}
 
+	function run() {
+		describe(
+			"failure counting",
+			() => {
+				beforeEach( () => reset() );
+
+				it(
+					"starts unlocked",
+					() => {
+						expect( variables.throttle.check( "10.0.0.1", "a@test.local" ).locked ).toBeFalse();
+					}
+				);
+
+				it(
+					"allows attempts up to the limit",
+					() => {
+						for ( var i = 1; i < variables.throttle.maxFailures(); i++ ) {
+							variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
+							expect( variables.throttle.check( "10.0.0.1",
+										"a@test.local" ).locked ).toBeFalse( "should still be open after #i# failure(s)" );
+						}
+					}
+				);
+
+				it(
+					"locks on the configured number of failures",
+					() => {
+						for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
+							variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
+						}
+
+						var state = variables.throttle.check( "10.0.0.1", "a@test.local" );
+						expect( state.locked ).toBeTrue();
+						expect( state.retryAfterSeconds ).toBeGT( 0 );
+						expect( state.retryAfterSeconds ).toBeLTE( variables.throttle.lockoutSeconds() );
+					}
+				);
+
+				it(
+					"clears the count on a successful sign-in",
+					() => {
+						variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
+						variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
+						expect( variables.throttle.failureCount( "10.0.0.1", "a@test.local" ) ).toBe( 2 );
+
+						variables.throttle.recordSuccess( "10.0.0.1", "a@test.local" );
+
+						expect( variables.throttle.failureCount( "10.0.0.1", "a@test.local" ) ).toBe( 0 );
+						expect( variables.throttle.check( "10.0.0.1", "a@test.local" ).locked ).toBeFalse();
+					}
+				);
+			}
+		);
+
+		describe(
+			"scoping",
+			() => {
+				beforeEach( () => reset() );
+
+				/**
+				 * Keying on email alone would let anyone lock a victim out of their own
+				 * account just by failing logins on their behalf.
+				 */
+				it(
+					"does not let one address lock an account for everyone else",
+					() => {
+						for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
+							variables.throttle.recordFailure( "10.0.0.66", "victim@test.local" );
+						}
+
+						expect( variables.throttle.check( "10.0.0.66", "victim@test.local" ).locked ).toBeTrue();
+						expect( variables.throttle.check( "10.0.0.99",
+									"victim@test.local" ).locked ).toBeFalse( "the victim's own address must stay usable" );
+					}
+				);
+
+				it(
+					"keeps separate accounts from the same address independent",
+					() => {
+						for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
+							variables.throttle.recordFailure( "10.0.0.1", "one@test.local" );
+						}
+
+						expect( variables.throttle.check( "10.0.0.1", "one@test.local" ).locked ).toBeTrue();
+						expect( variables.throttle.check( "10.0.0.1", "two@test.local" ).locked ).toBeFalse();
+					}
+				);
+
+				it(
+					"treats the email case-insensitively",
+					() => {
+						for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
+							variables.throttle.recordFailure( "10.0.0.1", "Mixed@Test.Local" );
+						}
+
+						expect( variables.throttle.check( "10.0.0.1",
+									"mixed@test.local" ).locked ).toBeTrue( "case must not be a way around the lockout" );
+					}
+				);
+			}
+		);
+
+		describe(
+			"expiry",
+			() => {
+				beforeEach( () => reset() );
+
+				it(
+					"forgets failures once the window has passed",
+					() => {
+						variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
+						variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
+
+						// Age the record beyond the counting window.
+						var store = application.pulselyLoginAttempts;
+						for ( var storeKey in store.keyArray() ) {
+							store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+						}
+
+						variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
+
+						expect( variables.throttle.failureCount( "10.0.0.1", "stale@test.local" ) ).toBe(
+								1,
+								"the lapsed failures should not count toward a lockout"
+							);
+					}
+				);
+
+				it(
+					"releases the lock once it expires",
+					() => {
+						for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
+							variables.throttle.recordFailure( "10.0.0.1", "expire@test.local" );
+						}
+						expect( variables.throttle.check( "10.0.0.1", "expire@test.local" ).locked ).toBeTrue();
+
+						var store = application.pulselyLoginAttempts;
+						for ( var storeKey in store.keyArray() ) {
+							store[ storeKey ].lockedUntil = int( getTickCount() / 1000 ) - 1;
+							store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+						}
+
+						expect( variables.throttle.check( "10.0.0.1", "expire@test.local" ).locked ).toBeFalse();
+					}
+				);
+
+				it(
+					"purges records that are no longer relevant",
+					() => {
+						variables.throttle.recordFailure( "10.0.0.1", "purge@test.local" );
+
+						var store = application.pulselyLoginAttempts;
+						for ( var storeKey in store.keyArray() ) {
+							store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+						}
+
+						expect( variables.throttle.purgeExpired() ).toBeGTE( 1 );
+						expect( application.pulselyLoginAttempts ).toBeEmpty();
+					}
+				);
+
+				it(
+					"keeps records that are still within the window",
+					() => {
+						variables.throttle.recordFailure( "10.0.0.1", "fresh@test.local" );
+
+						expect( variables.throttle.purgeExpired() ).toBe( 0 );
+						expect( variables.throttle.failureCount( "10.0.0.1", "fresh@test.local" ) ).toBe( 1 );
+					}
+				);
+			}
+		);
+	}
+
 	private function reset() {
 		application.pulselyLoginAttempts = {};
 	}
-
-	function run() {
-
-		describe( "failure counting", () => {
-
-			beforeEach( () => reset() );
-
-			it( "starts unlocked", () => {
-				expect( variables.throttle.check( "10.0.0.1", "a@test.local" ).locked ).toBeFalse();
-			} );
-
-			it( "allows attempts up to the limit", () => {
-				for ( var i = 1; i < variables.throttle.maxFailures(); i++ ) {
-					variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
-					expect( variables.throttle.check( "10.0.0.1", "a@test.local" ).locked )
-						.toBeFalse( "should still be open after #i# failure(s)" );
-				}
-			} );
-
-			it( "locks on the configured number of failures", () => {
-				for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
-					variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
-				}
-
-				var state = variables.throttle.check( "10.0.0.1", "a@test.local" );
-				expect( state.locked ).toBeTrue();
-				expect( state.retryAfterSeconds ).toBeGT( 0 );
-				expect( state.retryAfterSeconds ).toBeLTE( variables.throttle.lockoutSeconds() );
-			} );
-
-			it( "clears the count on a successful sign-in", () => {
-				variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
-				variables.throttle.recordFailure( "10.0.0.1", "a@test.local" );
-				expect( variables.throttle.failureCount( "10.0.0.1", "a@test.local" ) ).toBe( 2 );
-
-				variables.throttle.recordSuccess( "10.0.0.1", "a@test.local" );
-
-				expect( variables.throttle.failureCount( "10.0.0.1", "a@test.local" ) ).toBe( 0 );
-				expect( variables.throttle.check( "10.0.0.1", "a@test.local" ).locked ).toBeFalse();
-			} );
-
-		} );
-
-		describe( "scoping", () => {
-
-			beforeEach( () => reset() );
-
-			/**
-			 * Keying on email alone would let anyone lock a victim out of their own
-			 * account just by failing logins on their behalf.
-			 */
-			it( "does not let one address lock an account for everyone else", () => {
-				for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
-					variables.throttle.recordFailure( "10.0.0.66", "victim@test.local" );
-				}
-
-				expect( variables.throttle.check( "10.0.0.66", "victim@test.local" ).locked ).toBeTrue();
-				expect( variables.throttle.check( "10.0.0.99", "victim@test.local" ).locked )
-					.toBeFalse( "the victim's own address must stay usable" );
-			} );
-
-			it( "keeps separate accounts from the same address independent", () => {
-				for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
-					variables.throttle.recordFailure( "10.0.0.1", "one@test.local" );
-				}
-
-				expect( variables.throttle.check( "10.0.0.1", "one@test.local" ).locked ).toBeTrue();
-				expect( variables.throttle.check( "10.0.0.1", "two@test.local" ).locked ).toBeFalse();
-			} );
-
-			it( "treats the email case-insensitively", () => {
-				for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
-					variables.throttle.recordFailure( "10.0.0.1", "Mixed@Test.Local" );
-				}
-
-				expect( variables.throttle.check( "10.0.0.1", "mixed@test.local" ).locked )
-					.toBeTrue( "case must not be a way around the lockout" );
-			} );
-
-		} );
-
-		describe( "expiry", () => {
-
-			beforeEach( () => reset() );
-
-			it( "forgets failures once the window has passed", () => {
-				variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
-				variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
-
-				// Age the record beyond the counting window.
-				var store = application.pulselyLoginAttempts;
-				for ( var storeKey in store.keyArray() ) {
-					store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
-				}
-
-				variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
-
-				expect( variables.throttle.failureCount( "10.0.0.1", "stale@test.local" ) )
-					.toBe( 1, "the lapsed failures should not count toward a lockout" );
-			} );
-
-			it( "releases the lock once it expires", () => {
-				for ( var i = 1; i <= variables.throttle.maxFailures(); i++ ) {
-					variables.throttle.recordFailure( "10.0.0.1", "expire@test.local" );
-				}
-				expect( variables.throttle.check( "10.0.0.1", "expire@test.local" ).locked ).toBeTrue();
-
-				var store = application.pulselyLoginAttempts;
-				for ( var storeKey in store.keyArray() ) {
-					store[ storeKey ].lockedUntil = int( getTickCount() / 1000 ) - 1;
-					store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
-				}
-
-				expect( variables.throttle.check( "10.0.0.1", "expire@test.local" ).locked ).toBeFalse();
-			} );
-
-			it( "purges records that are no longer relevant", () => {
-				variables.throttle.recordFailure( "10.0.0.1", "purge@test.local" );
-
-				var store = application.pulselyLoginAttempts;
-				for ( var storeKey in store.keyArray() ) {
-					store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
-				}
-
-				expect( variables.throttle.purgeExpired() ).toBeGTE( 1 );
-				expect( application.pulselyLoginAttempts ).toBeEmpty();
-			} );
-
-			it( "keeps records that are still within the window", () => {
-				variables.throttle.recordFailure( "10.0.0.1", "fresh@test.local" );
-
-				expect( variables.throttle.purgeExpired() ).toBe( 0 );
-				expect( variables.throttle.failureCount( "10.0.0.1", "fresh@test.local" ) ).toBe( 1 );
-			} );
-
-		} );
-
-	}
-
 }

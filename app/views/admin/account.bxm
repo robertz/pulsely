@@ -7,14 +7,14 @@
 			#encodeForHTML( prc.viewing.name )# &middot; #encodeForHTML( prc.viewing.planName )# plan
 			&middot; joined #encodeForHTML( prc.viewing.createdAt )#
 			<bx:if prc.viewing.isAdmin> &middot; <span class="pill pill-ok">administrator</span></bx:if>
-			<bx:if not prc.viewing.isActive> &middot; <span class="pill pill-off">suspended</span></bx:if>
+			<bx:if !prc.viewing.isActive> &middot; <span class="pill pill-off">suspended</span></bx:if>
 		</p>
 	</div>
 </div>
 
 <section class="card">
 	<h2>Apps</h2>
-	<bx:if arrayLen( prc.apps ) eq 0>
+	<bx:if arrayLen( prc.apps ) EQ 0>
 		<p class="muted">This account has no apps.</p>
 	<bx:else>
 		<table class="table">

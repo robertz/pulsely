@@ -6,16 +6,15 @@
  * tests/stomp-check.mjs, which drives a real WebSocket.
  */
 class extends="testbox.system.BaseSpec" {
-
-	variables.DEV_APP   = "22222222222222222222222222222222";
+	variables.DEV_APP = "22222222222222222222222222222222";
 	variables.OTHER_APP = "55555555555555555555555555555555";
 
 	variables.BIZ_ACCOUNT = "dd000000000000000000000000000001";
-	variables.BIZ_APP     = "dd000000000000000000000000000002";
+	variables.BIZ_APP = "dd000000000000000000000000000002";
 
 	function beforeAll() {
 		variables.broker = new wwwroot.WebSocket();
-		variables.ops    = new app.models.OpsService();
+		variables.ops = new app.models.OpsService();
 
 		// An app whose plan permits private and presence channels but which has no
 		// rules at all — the only way to reach the "no matching rule" branch now
@@ -25,140 +24,271 @@ class extends="testbox.system.BaseSpec" {
 			 SELECT UNHEX(:acct), 'ws-spec@test.local', 'WS Spec', 'x', id
 			 FROM plans WHERE name = 'Business'
 			 ON DUPLICATE KEY UPDATE name = VALUES(name)",
-			{ acct : variables.BIZ_ACCOUNT },
-			{ datasource : "pulsely" }
+			{ acct: variables.BIZ_ACCOUNT },
+			{ datasource: "pulsely" }
 		);
 		queryExecute(
 			"INSERT INTO apps (id, account_id, name, app_key, app_secret)
 			 VALUES (UNHEX(:app), UNHEX(:acct), 'WS Spec App', 'wsspeckey', 'wsspecsecret')
 			 ON DUPLICATE KEY UPDATE name = VALUES(name)",
-			{ app : variables.BIZ_APP, acct : variables.BIZ_ACCOUNT },
-			{ datasource : "pulsely" }
+			{ app: variables.BIZ_APP, acct: variables.BIZ_ACCOUNT },
+			{ datasource: "pulsely" }
 		);
 	}
 
 	function afterAll() {
-		queryExecute( "DELETE FROM channel_auth_rules WHERE app_id = UNHEX(:app)", { app : variables.BIZ_APP }, { datasource : "pulsely" } );
-		queryExecute( "DELETE FROM apps WHERE id = UNHEX(:app)", { app : variables.BIZ_APP }, { datasource : "pulsely" } );
-		queryExecute( "DELETE FROM accounts WHERE id = UNHEX(:acct)", { acct : variables.BIZ_ACCOUNT }, { datasource : "pulsely" } );
-	}
-
-	private struct function devConnection( string userId = "" ) {
-		return { "appId" : variables.DEV_APP, "userId" : userId };
-	}
-
-	private any function fakeChannel() {
-		// authorize() only ever asks a channel for its hash, as a socket id.
-		return createObject( "java", "java.lang.Object" ).init();
+		queryExecute(
+			"DELETE FROM channel_auth_rules WHERE app_id = UNHEX(:app)",
+			{ app: variables.BIZ_APP },
+			{ datasource: "pulsely" }
+		);
+		queryExecute(
+			"DELETE FROM apps WHERE id = UNHEX(:app)",
+			{ app: variables.BIZ_APP },
+			{ datasource: "pulsely" }
+		);
+		queryExecute(
+			"DELETE FROM accounts WHERE id = UNHEX(:acct)",
+			{ acct: variables.BIZ_ACCOUNT },
+			{ datasource: "pulsely" }
+		);
 	}
 
 	function run() {
+		describe(
+			"authorize() publish access",
+			() => {
+				/**
+				 * The trigger API publishes server-side via send(), which bypasses this
+				 * hook. Anything arriving over a client socket must be refused.
+				 */
+				it(
+					"refuses write access from any client connection",
+					() => {
+						expect(
+							() => variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#.orders",
+									"write",
+									fakeChannel(),
+									devConnection()
+								)
+						).toThrow( type = "STOMP-Authorization-failure" );
+					}
+				);
 
-		describe( "authorize() publish access", () => {
+				it(
+					"refuses write access even to the connection's own namespace",
+					() => {
+						expect(
+							() => variables.broker.authorize(
+									"devkey123",
+									"direct",
+									"#variables.DEV_APP#.anything",
+									"write",
+									fakeChannel(),
+									devConnection()
+								)
+						).toThrow( type = "STOMP-Authorization-failure" );
+					}
+				);
+			}
+		);
 
-			/**
-			 * The trigger API publishes server-side via send(), which bypasses this
-			 * hook. Anything arriving over a client socket must be refused.
-			 */
-			it( "refuses write access from any client connection", () => {
-				expect( () => variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#.orders", "write", fakeChannel(), devConnection()
-				) ).toThrow( type = "STOMP-Authorization-failure" );
-			} );
+		describe(
+			"authorize() tenant isolation",
+			() => {
+				it(
+					"allows reading a public channel in the connection's own namespace",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#.orders",
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeTrue();
+					}
+				);
 
-			it( "refuses write access even to the connection's own namespace", () => {
-				expect( () => variables.broker.authorize(
-					"devkey123", "direct", "#variables.DEV_APP#.anything", "write", fakeChannel(), devConnection()
-				) ).toThrow( type = "STOMP-Authorization-failure" );
-			} );
+				it(
+					"refuses another app's namespace",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.OTHER_APP#.orders",
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeFalse();
+					}
+				);
 
-		} );
+				it(
+					"refuses a bare destination with no namespace prefix",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"orders",
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeFalse();
+					}
+				);
 
-		describe( "authorize() tenant isolation", () => {
+				/**
+				 * A prefix check on its own would let `{appId}xyz.orders` through, so the
+				 * separator has to be part of what is matched.
+				 */
+				it(
+					"refuses a namespace that merely starts with the app id",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#deadbeef.orders",
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeFalse();
+					}
+				);
 
-			it( "allows reading a public channel in the connection's own namespace", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#.orders", "read", fakeChannel(), devConnection()
-				) ).toBeTrue();
-			} );
+				it(
+					"refuses an empty channel name after the prefix",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#.",
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeFalse();
+					}
+				);
 
-			it( "refuses another app's namespace", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.OTHER_APP#.orders", "read", fakeChannel(), devConnection()
-				) ).toBeFalse();
-			} );
+				it(
+					"refuses when the connection carries no app id",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#.orders",
+									"read",
+									fakeChannel(),
+									{ "userId": "" }
+								)
+						).toBeFalse();
+					}
+				);
 
-			it( "refuses a bare destination with no namespace prefix", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "orders", "read", fakeChannel(), devConnection()
-				) ).toBeFalse();
-			} );
+				it(
+					"refuses when the connection's app id is malformed",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"not-hex.orders",
+									"read",
+									fakeChannel(),
+									{ "appId": "not-hex", "userId": "" }
+								)
+						).toBeFalse();
+					}
+				);
+			}
+		);
 
-			/**
-			 * A prefix check on its own would let `{appId}xyz.orders` through, so the
-			 * separator has to be part of what is matched.
-			 */
-			it( "refuses a namespace that merely starts with the app id", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#deadbeef.orders", "read", fakeChannel(), devConnection()
-				) ).toBeFalse();
-			} );
+		describe(
+			"authorize() ops feed",
+			() => {
+				it(
+					"allows the reserved ops channel to a connection holding an ops token",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									variables.ops.opsDestination( variables.DEV_APP ),
+									"read",
+									fakeChannel(),
+									devConnection( variables.ops.opsUser() )
+								)
+						).toBeTrue();
+					}
+				);
 
-			it( "refuses an empty channel name after the prefix", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#.", "read", fakeChannel(), devConnection()
-				) ).toBeFalse();
-			} );
+				it(
+					"refuses the ops channel to an anonymous connection",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									variables.ops.opsDestination( variables.DEV_APP ),
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeFalse();
+					}
+				);
 
-			it( "refuses when the connection carries no app id", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#.orders", "read", fakeChannel(), { "userId" : "" }
-				) ).toBeFalse();
-			} );
+				/**
+				 * A customer's own end users may hold valid tokens for this app; usage
+				 * counters are still the account holder's data, not theirs.
+				 */
+				it(
+					"refuses the ops channel to an ordinary end-user token",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									variables.ops.opsDestination( variables.DEV_APP ),
+									"read",
+									fakeChannel(),
+									devConnection( "user-1234" )
+								)
+						).toBeFalse();
+					}
+				);
 
-			it( "refuses when the connection's app id is malformed", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "not-hex.orders", "read", fakeChannel(), { "appId" : "not-hex", "userId" : "" }
-				) ).toBeFalse();
-			} );
-
-		} );
-
-		describe( "authorize() ops feed", () => {
-
-			it( "allows the reserved ops channel to a connection holding an ops token", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", variables.ops.opsDestination( variables.DEV_APP ),
-					"read", fakeChannel(), devConnection( variables.ops.opsUser() )
-				) ).toBeTrue();
-			} );
-
-			it( "refuses the ops channel to an anonymous connection", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", variables.ops.opsDestination( variables.DEV_APP ),
-					"read", fakeChannel(), devConnection()
-				) ).toBeFalse();
-			} );
-
-			/**
-			 * A customer's own end users may hold valid tokens for this app; usage
-			 * counters are still the account holder's data, not theirs.
-			 */
-			it( "refuses the ops channel to an ordinary end-user token", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", variables.ops.opsDestination( variables.DEV_APP ),
-					"read", fakeChannel(), devConnection( "user-1234" )
-				) ).toBeFalse();
-			} );
-
-			it( "refuses another app's ops channel outright", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", variables.ops.opsDestination( variables.OTHER_APP ),
-					"read", fakeChannel(), devConnection( variables.ops.opsUser() )
-				) ).toBeFalse();
-			} );
-
-		} );
+				it(
+					"refuses another app's ops channel outright",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									variables.ops.opsDestination( variables.OTHER_APP ),
+									"read",
+									fakeChannel(),
+									devConnection( variables.ops.opsUser() )
+								)
+						).toBeFalse();
+					}
+				);
+			}
+		);
 
 		/**
 		 * A refused private/presence channel is not connection-fatal (unlike the
@@ -175,118 +305,248 @@ class extends="testbox.system.BaseSpec" {
 		 * webhook), which is exactly the boundary this file's own header says
 		 * unit specs hand off to.
 		 */
-		describe( "authorize() private and presence channels", () => {
+		describe(
+			"authorize() private and presence channels",
+			() => {
+				it(
+					"no longer decides a private channel — defers to authorizeChannelSubscription()",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"wsspeckey",
+									"",
+									"#variables.BIZ_APP#.private-anything",
+									"read",
+									fakeChannel(),
+									{ "appId": variables.BIZ_APP, "userId": "user-1" }
+								)
+						).toBeTrue();
+					}
+				);
 
-			it( "no longer decides a private channel — defers to authorizeChannelSubscription()", () => {
-				expect( variables.broker.authorize(
-					"wsspeckey", "", "#variables.BIZ_APP#.private-anything",
-					"read", fakeChannel(), { "appId" : variables.BIZ_APP, "userId" : "user-1" }
-				) ).toBeTrue();
-			} );
+				it(
+					"no longer decides a presence channel — defers to authorizeChannelSubscription()",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#.presence-no-rule-exists",
+									"read",
+									fakeChannel(),
+									devConnection( "user-1" )
+								)
+						).toBeTrue();
+					}
+				);
 
-			it( "no longer decides a presence channel — defers to authorizeChannelSubscription()", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#.presence-no-rule-exists",
-					"read", fakeChannel(), devConnection( "user-1" )
-				) ).toBeTrue();
-			} );
-
-			it( "still refuses a private/presence destination outside the connection's own namespace", () => {
-				// The hard tenant-isolation check still runs before anything else.
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.OTHER_APP#.private-orders",
-					"read", fakeChannel(), devConnection( "user-1" )
-				) ).toBeFalse();
-			} );
-
-		} );
+				it(
+					"still refuses a private/presence destination outside the connection's own namespace",
+					() => {
+						// The hard tenant-isolation check still runs before anything else.
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.OTHER_APP#.private-orders",
+									"read",
+									fakeChannel(),
+									devConnection( "user-1" )
+								)
+						).toBeFalse();
+					}
+				);
+			}
+		);
 
 		/**
 		 * Plan entitlements (private/presence gated by the app's plan) moved with
 		 * the rest of the channel-rule decision into authorizeChannelSubscription()
 		 * — see the comment above. authorize() itself is no longer plan-aware.
 		 */
-		describe( "authorize() and plan entitlements", () => {
+		describe(
+			"authorize() and plan entitlements",
+			() => {
+				it(
+					"does not gate private channels on the plan — that happens after the subscribe is accepted",
+					() => {
+						// "Other App" is on Sandbox: no private, no presence. authorize()
+						// still returns true; onSubscribe()'s post-accept check is what
+						// refuses it, verified at the frame level in stomp-check.mjs.
+						expect(
+							variables.broker.authorize(
+									"otherkey789",
+									"",
+									"#variables.OTHER_APP#.private-orders",
+									"read",
+									fakeChannel(),
+									{ "appId": variables.OTHER_APP, "userId": "user-1" }
+								)
+						).toBeTrue();
+					}
+				);
 
-			it( "does not gate private channels on the plan — that happens after the subscribe is accepted", () => {
-				// "Other App" is on Sandbox: no private, no presence. authorize()
-				// still returns true; onSubscribe()'s post-accept check is what
-				// refuses it, verified at the frame level in stomp-check.mjs.
-				expect( variables.broker.authorize(
-					"otherkey789", "", "#variables.OTHER_APP#.private-orders",
-					"read", fakeChannel(), { "appId" : variables.OTHER_APP, "userId" : "user-1" }
-				) ).toBeTrue();
-			} );
+				it(
+					"does not gate ordinary public channels on the plan",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"otherkey789",
+									"",
+									"#variables.OTHER_APP#.orders",
+									"read",
+									fakeChannel(),
+									{ "appId": variables.OTHER_APP, "userId": "" }
+								)
+						).toBeTrue( "public channels are included on every plan" );
+					}
+				);
 
-			it( "does not gate ordinary public channels on the plan", () => {
-				expect( variables.broker.authorize(
-					"otherkey789", "", "#variables.OTHER_APP#.orders",
-					"read", fakeChannel(), { "appId" : variables.OTHER_APP, "userId" : "" }
-				) ).toBeTrue( "public channels are included on every plan" );
-			} );
+				it(
+					"does not gate a channel that merely contains the word private",
+					() => {
+						expect(
+							variables.broker.authorize(
+									"devkey123",
+									"",
+									"#variables.DEV_APP#.not-private-at-all",
+									"read",
+									fakeChannel(),
+									devConnection()
+								)
+						).toBeTrue();
+					}
+				);
+			}
+		);
 
-			it( "does not gate a channel that merely contains the word private", () => {
-				expect( variables.broker.authorize(
-					"devkey123", "", "#variables.DEV_APP#.not-private-at-all",
-					"read", fakeChannel(), devConnection()
-				) ).toBeTrue();
-			} );
+		describe(
+			"authenticate()",
+			() => {
+				beforeEach( () => {
+						application.pulselyConnCounts = {};
+					} );
 
-		} );
+				it(
+					"rejects an unknown app key",
+					() => {
+						expect(
+							() => variables.broker.authenticate(
+									"no-such-key",
+									"",
+									"localhost",
+									fakeChannel(),
+									{}
+								)
+						).toThrow( type = "STOMP-Authentication-failure" );
+					}
+				);
 
-		describe( "authenticate()", () => {
+				it(
+					"accepts a valid app key and stamps the app id onto the connection",
+					() => {
+						var metadata = {};
 
-			beforeEach( () => { application.pulselyConnCounts = {}; } );
+						expect(
+							variables.broker.authenticate(
+									"devkey123",
+									"",
+									"localhost",
+									fakeChannel(),
+									metadata
+								)
+						).toBeTrue();
+						expect( metadata.appId ).toBe( variables.DEV_APP );
+						expect( metadata.userId ).toBe( "", "no passcode means an anonymous connection" );
+					}
+				);
 
-			it( "rejects an unknown app key", () => {
-				expect( () => variables.broker.authenticate(
-					"no-such-key", "", "localhost", fakeChannel(), {}
-				) ).toThrow( type = "STOMP-Authentication-failure" );
-			} );
+				it(
+					"accepts a validly minted ops token and records the ops user",
+					() => {
+						var token = variables.ops.mintOpsToken( "devkey123", "devsecret456" );
+						var metadata = {};
 
-			it( "accepts a valid app key and stamps the app id onto the connection", () => {
-				var metadata = {};
+						expect(
+							variables.broker.authenticate(
+									"devkey123",
+									token,
+									"localhost",
+									fakeChannel(),
+									metadata
+								)
+						).toBeTrue();
+						expect( metadata.userId ).toBe( variables.ops.opsUser() );
+					}
+				);
 
-				expect( variables.broker.authenticate( "devkey123", "", "localhost", fakeChannel(), metadata ) ).toBeTrue();
-				expect( metadata.appId ).toBe( variables.DEV_APP );
-				expect( metadata.userId ).toBe( "", "no passcode means an anonymous connection" );
-			} );
+				it(
+					"rejects a token signed with the wrong secret",
+					() => {
+						var forged = variables.ops.mintOpsToken( "devkey123", "not-the-secret" );
 
-			it( "accepts a validly minted ops token and records the ops user", () => {
-				var token = variables.ops.mintOpsToken( "devkey123", "devsecret456" );
-				var metadata = {};
+						expect(
+							() => variables.broker.authenticate(
+									"devkey123",
+									forged,
+									"localhost",
+									fakeChannel(),
+									{}
+								)
+						).toThrow( type = "STOMP-Authentication-failure" );
+					}
+				);
 
-				expect( variables.broker.authenticate( "devkey123", token, "localhost", fakeChannel(), metadata ) ).toBeTrue();
-				expect( metadata.userId ).toBe( variables.ops.opsUser() );
-			} );
+				it(
+					"rejects an expired token",
+					() => {
+						var expiredAt = int( getTickCount() / 1000 ) - 60;
+						var signature = lcase(
+							hmac(
+								"devkey123:#expiredAt#:user-1",
+								"devsecret456",
+								"HMACSHA256"
+							)
+						);
 
-			it( "rejects a token signed with the wrong secret", () => {
-				var forged = variables.ops.mintOpsToken( "devkey123", "not-the-secret" );
+						expect(
+							() => variables.broker.authenticate(
+									"devkey123",
+									"#expiredAt#.user-1.#signature#",
+									"localhost",
+									fakeChannel(),
+									{}
+								)
+						).toThrow( type = "STOMP-Authentication-failure" );
+					}
+				);
 
-				expect( () => variables.broker.authenticate(
-					"devkey123", forged, "localhost", fakeChannel(), {}
-				) ).toThrow( type = "STOMP-Authentication-failure" );
-			} );
-
-			it( "rejects an expired token", () => {
-				var expiredAt = int( getTickCount() / 1000 ) - 60;
-				var signature = lcase( hmac( "devkey123:#expiredAt#:user-1", "devsecret456", "HMACSHA256" ) );
-
-				expect( () => variables.broker.authenticate(
-					"devkey123", "#expiredAt#.user-1.#signature#", "localhost", fakeChannel(), {}
-				) ).toThrow( type = "STOMP-Authentication-failure" );
-			} );
-
-			it( "rejects a malformed token", () => {
-				for ( var bad in [ "garbage", "1.2", "1.2.3.4" ] ) {
-					expect( () => variables.broker.authenticate(
-						"devkey123", bad, "localhost", fakeChannel(), {}
-					) ).toThrow( type = "STOMP-Authentication-failure" );
-				}
-			} );
-
-		} );
-
+				it(
+					"rejects a malformed token",
+					() => {
+						for ( var bad in [ "garbage", "1.2", "1.2.3.4"] ) {
+							expect(
+								() => variables.broker.authenticate(
+										"devkey123",
+										bad,
+										"localhost",
+										fakeChannel(),
+										{}
+									)
+							).toThrow( type = "STOMP-Authentication-failure" );
+						}
+					}
+				);
+			}
+		);
 	}
 
+	private struct function devConnection( string userId = "" ) {
+		return { "appId": variables.DEV_APP, "userId": userId };
+	}
+
+	private any function fakeChannel() {
+		// authorize() only ever asks a channel for its hash, as a socket id.
+		return createObject( "java", "java.lang.Object" ).init();
+	}
 }

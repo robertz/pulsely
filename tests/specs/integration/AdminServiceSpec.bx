@@ -1,14 +1,284 @@
 class extends="coldbox.system.testing.BaseTestCase" {
-
 	this.loadColdBox = true;
 	this.unloadColdBox = false;
 
 	variables.ADMIN_ID = "bb110000000000000000000000000ad1";
-	variables.USER_ID  = "bb110000000000000000000000000f51";
+	variables.USER_ID = "bb110000000000000000000000000f51";
 
 	function beforeAll() {
 		super.beforeAll();
 		variables.admin = getInstance( "AdminService" );
+	}
+
+	function run() {
+		describe(
+			"isAdmin()",
+			() => {
+				beforeEach( () => seed() );
+				afterEach( () => cleanup() );
+
+				it(
+					"recognises an administrator",
+					() => {
+						expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue();
+					}
+				);
+
+				it(
+					"refuses an ordinary account",
+					() => {
+						expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeFalse();
+					}
+				);
+
+				it(
+					"refuses a malformed or unknown id",
+					() => {
+						expect( variables.admin.isAdmin( "not-hex" ) ).toBeFalse();
+						expect( variables.admin.isAdmin( "" ) ).toBeFalse();
+						expect( variables.admin.isAdmin( "cc110000000000000000000000000999" ) ).toBeFalse();
+					}
+				);
+
+				/**
+				 * Suspending an administrator must also close the console to them, or
+				 * suspension is not really suspension.
+				 */
+				it(
+					"refuses a suspended administrator",
+					() => {
+						queryExecute(
+							"UPDATE accounts SET is_active = 0 WHERE id = UNHEX(:id)",
+							{ id: variables.ADMIN_ID },
+							{ datasource: "pulsely" }
+						);
+
+						expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeFalse();
+					}
+				);
+			}
+		);
+
+		/**
+		 * Every mutation re-checks the caller. The UI hiding a button is not the
+		 * control — this is.
+		 */
+		describe(
+			"authorization on every action",
+			() => {
+				beforeEach( () => seed() );
+				afterEach( () => cleanup() );
+
+				it(
+					"refuses setPlan from a non-admin",
+					() => {
+						var before = planOf( variables.USER_ID );
+
+						var result = variables.admin.setPlan(
+								variables.USER_ID,
+								variables.USER_ID,
+								businessPlanId()
+							);
+
+						expect( result.ok ).toBeFalse();
+						expect( planOf( variables.USER_ID ) ).toBe( before, "the plan must not change" );
+					}
+				);
+
+				it(
+					"refuses setActive from a non-admin",
+					() => {
+						var result = variables.admin.setActive(
+								variables.USER_ID,
+								variables.ADMIN_ID,
+								false
+							);
+
+						expect( result.ok ).toBeFalse();
+						expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue( "the admin must still be active" );
+					}
+				);
+
+				it(
+					"refuses setAdmin from a non-admin",
+					() => {
+						var result = variables.admin.setAdmin(
+								variables.USER_ID,
+								variables.USER_ID,
+								true
+							);
+
+						expect( result.ok ).toBeFalse();
+						expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeFalse( "no self-promotion" );
+					}
+				);
+			}
+		);
+
+		describe(
+			"administering accounts",
+			() => {
+				beforeEach( () => seed() );
+				afterEach( () => cleanup() );
+
+				it(
+					"changes another account's plan",
+					() => {
+						var result = variables.admin.setPlan(
+								variables.ADMIN_ID,
+								variables.USER_ID,
+								businessPlanId()
+							);
+
+						expect( result.ok ).toBeTrue();
+						expect( planOf( variables.USER_ID ) ).toBe( "Business" );
+					}
+				);
+
+				it(
+					"ignores an unknown plan id",
+					() => {
+						var before = planOf( variables.USER_ID );
+
+						variables.admin.setPlan(
+								variables.ADMIN_ID,
+								variables.USER_ID,
+								"cc110000000000000000000000000999"
+							);
+
+						expect( planOf( variables.USER_ID ) ).toBe( before );
+					}
+				);
+
+				it(
+					"suspends and reactivates an account",
+					() => {
+						expect( variables.admin.setActive(
+									variables.ADMIN_ID,
+									variables.USER_ID,
+									false
+								).ok ).toBeTrue();
+
+						var suspended = queryExecute(
+							"SELECT is_active FROM accounts WHERE id = UNHEX(:id)",
+							{ id: variables.USER_ID },
+							{ datasource: "pulsely" }
+						);
+						expect(
+							isBoolean( suspended.is_active[ 1 ] ) && suspended.is_active[ 1 ]
+						).toBeFalse();
+
+						variables.admin.setActive(
+								variables.ADMIN_ID,
+								variables.USER_ID,
+								true
+							);
+						var back = queryExecute(
+							"SELECT is_active FROM accounts WHERE id = UNHEX(:id)",
+							{ id: variables.USER_ID },
+							{ datasource: "pulsely" }
+						);
+						expect( isBoolean( back.is_active[ 1 ] ) && back.is_active[ 1 ] ).toBeTrue();
+					}
+				);
+
+				it(
+					"grants and revokes administrator access",
+					() => {
+						expect( variables.admin.setAdmin(
+									variables.ADMIN_ID,
+									variables.USER_ID,
+									true
+								).ok ).toBeTrue();
+						expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeTrue();
+
+						expect( variables.admin.setAdmin(
+									variables.ADMIN_ID,
+									variables.USER_ID,
+									false
+								).ok ).toBeTrue();
+						expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeFalse();
+					}
+				);
+
+				it(
+					"lists every account with its plan and app count",
+					() => {
+						var listed = variables
+							.admin
+							.listAccounts()
+							.filter( ( row ) => row.email == "spec-user@test.local" );
+
+						expect( listed.len() ).toBe( 1 );
+						expect( listed[ 1 ] ).toHaveKey( "planName" );
+						expect( listed[ 1 ] ).toHaveKey( "appCount" );
+						expect( listed[ 1 ].isAdmin ).toBeFalse();
+					}
+				);
+			}
+		);
+
+		/**
+		 * Losing every route into the console is not recoverable through the UI.
+		 */
+		describe(
+			"lockout guards",
+			() => {
+				beforeEach( () => seed() );
+				afterEach( () => cleanup() );
+
+				it(
+					"refuses to suspend yourself",
+					() => {
+						var result = variables.admin.setActive(
+								variables.ADMIN_ID,
+								variables.ADMIN_ID,
+								false
+							);
+
+						expect( result.ok ).toBeFalse();
+						expect( result.error ).toInclude( "your own" );
+						expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue();
+					}
+				);
+
+				it(
+					"refuses to revoke your own access",
+					() => {
+						var result = variables.admin.setAdmin(
+								variables.ADMIN_ID,
+								variables.ADMIN_ID,
+								false
+							);
+
+						expect( result.ok ).toBeFalse();
+						expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue();
+					}
+				);
+
+				it(
+					"refuses to remove the last administrator",
+					() => {
+						// Promote the second account, then have it try to demote the first
+						// while it is the only other admin — allowed, because one remains.
+						variables.admin.setAdmin(
+								variables.ADMIN_ID,
+								variables.USER_ID,
+								true
+							);
+						expect( variables.admin.setAdmin(
+									variables.USER_ID,
+									variables.ADMIN_ID,
+									false
+								).ok ).toBeTrue();
+
+						// Now only USER_ID is an admin among the spec accounts; the real
+						// installation may have others, so assert the rule rather than a count.
+						expect( variables.admin.adminCount() ).toBeGTE( 1 );
+					}
+				);
+			}
+		);
 	}
 
 	private function seed() {
@@ -17,20 +287,23 @@ class extends="coldbox.system.testing.BaseTestCase" {
 			"INSERT INTO accounts (id, email, name, password_hash, plan_id, is_admin, is_active)
 			 SELECT UNHEX(:id), 'spec-admin@test.local', 'Spec Admin', 'x', id, 1, 1
 			 FROM plans WHERE name = 'Sandbox'",
-			{ id : variables.ADMIN_ID }, { datasource : "pulsely" }
+			{ id: variables.ADMIN_ID },
+			{ datasource: "pulsely" }
 		);
 		queryExecute(
 			"INSERT INTO accounts (id, email, name, password_hash, plan_id, is_admin, is_active)
 			 SELECT UNHEX(:id), 'spec-user@test.local', 'Spec User', 'x', id, 0, 1
 			 FROM plans WHERE name = 'Sandbox'",
-			{ id : variables.USER_ID }, { datasource : "pulsely" }
+			{ id: variables.USER_ID },
+			{ datasource: "pulsely" }
 		);
 	}
 
 	private function cleanup() {
 		queryExecute(
 			"DELETE FROM accounts WHERE email IN ('spec-admin@test.local','spec-user@test.local')",
-			{}, { datasource : "pulsely" }
+			{},
+			{ datasource: "pulsely" }
 		);
 	}
 
@@ -38,7 +311,8 @@ class extends="coldbox.system.testing.BaseTestCase" {
 		var row = queryExecute(
 			"SELECT COALESCE(p.name,'(none)') AS planName FROM accounts a
 			 LEFT JOIN plans p ON p.id = a.plan_id WHERE a.id = UNHEX(:id)",
-			{ id : accountId }, { datasource : "pulsely" }
+			{ id: accountId },
+			{ datasource: "pulsely" }
 		);
 		return row.recordCount ? row.planName[ 1 ] : "";
 	}
@@ -46,173 +320,8 @@ class extends="coldbox.system.testing.BaseTestCase" {
 	private string function businessPlanId() {
 		return queryExecute(
 			"SELECT LOWER(HEX(id)) AS id FROM plans WHERE name = 'Business'",
-			{}, { datasource : "pulsely" }
+			{},
+			{ datasource: "pulsely" }
 		).id[ 1 ];
 	}
-
-	function run() {
-
-		describe( "isAdmin()", () => {
-
-			beforeEach( () => seed() );
-			afterEach( () => cleanup() );
-
-			it( "recognises an administrator", () => {
-				expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue();
-			} );
-
-			it( "refuses an ordinary account", () => {
-				expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeFalse();
-			} );
-
-			it( "refuses a malformed or unknown id", () => {
-				expect( variables.admin.isAdmin( "not-hex" ) ).toBeFalse();
-				expect( variables.admin.isAdmin( "" ) ).toBeFalse();
-				expect( variables.admin.isAdmin( "cc110000000000000000000000000999" ) ).toBeFalse();
-			} );
-
-			/**
-			 * Suspending an administrator must also close the console to them, or
-			 * suspension is not really suspension.
-			 */
-			it( "refuses a suspended administrator", () => {
-				queryExecute(
-					"UPDATE accounts SET is_active = 0 WHERE id = UNHEX(:id)",
-					{ id : variables.ADMIN_ID }, { datasource : "pulsely" }
-				);
-
-				expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeFalse();
-			} );
-
-		} );
-
-		/**
-		 * Every mutation re-checks the caller. The UI hiding a button is not the
-		 * control — this is.
-		 */
-		describe( "authorization on every action", () => {
-
-			beforeEach( () => seed() );
-			afterEach( () => cleanup() );
-
-			it( "refuses setPlan from a non-admin", () => {
-				var before = planOf( variables.USER_ID );
-
-				var result = variables.admin.setPlan( variables.USER_ID, variables.USER_ID, businessPlanId() );
-
-				expect( result.ok ).toBeFalse();
-				expect( planOf( variables.USER_ID ) ).toBe( before, "the plan must not change" );
-			} );
-
-			it( "refuses setActive from a non-admin", () => {
-				var result = variables.admin.setActive( variables.USER_ID, variables.ADMIN_ID, false );
-
-				expect( result.ok ).toBeFalse();
-				expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue( "the admin must still be active" );
-			} );
-
-			it( "refuses setAdmin from a non-admin", () => {
-				var result = variables.admin.setAdmin( variables.USER_ID, variables.USER_ID, true );
-
-				expect( result.ok ).toBeFalse();
-				expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeFalse( "no self-promotion" );
-			} );
-
-		} );
-
-		describe( "administering accounts", () => {
-
-			beforeEach( () => seed() );
-			afterEach( () => cleanup() );
-
-			it( "changes another account's plan", () => {
-				var result = variables.admin.setPlan( variables.ADMIN_ID, variables.USER_ID, businessPlanId() );
-
-				expect( result.ok ).toBeTrue();
-				expect( planOf( variables.USER_ID ) ).toBe( "Business" );
-			} );
-
-			it( "ignores an unknown plan id", () => {
-				var before = planOf( variables.USER_ID );
-
-				variables.admin.setPlan( variables.ADMIN_ID, variables.USER_ID, "cc110000000000000000000000000999" );
-
-				expect( planOf( variables.USER_ID ) ).toBe( before );
-			} );
-
-			it( "suspends and reactivates an account", () => {
-				expect( variables.admin.setActive( variables.ADMIN_ID, variables.USER_ID, false ).ok ).toBeTrue();
-
-				var suspended = queryExecute(
-					"SELECT is_active FROM accounts WHERE id = UNHEX(:id)",
-					{ id : variables.USER_ID }, { datasource : "pulsely" }
-				);
-				expect( isBoolean( suspended.is_active[ 1 ] ) && suspended.is_active[ 1 ] ).toBeFalse();
-
-				variables.admin.setActive( variables.ADMIN_ID, variables.USER_ID, true );
-				var back = queryExecute(
-					"SELECT is_active FROM accounts WHERE id = UNHEX(:id)",
-					{ id : variables.USER_ID }, { datasource : "pulsely" }
-				);
-				expect( isBoolean( back.is_active[ 1 ] ) && back.is_active[ 1 ] ).toBeTrue();
-			} );
-
-			it( "grants and revokes administrator access", () => {
-				expect( variables.admin.setAdmin( variables.ADMIN_ID, variables.USER_ID, true ).ok ).toBeTrue();
-				expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeTrue();
-
-				expect( variables.admin.setAdmin( variables.ADMIN_ID, variables.USER_ID, false ).ok ).toBeTrue();
-				expect( variables.admin.isAdmin( variables.USER_ID ) ).toBeFalse();
-			} );
-
-			it( "lists every account with its plan and app count", () => {
-				var listed = variables.admin.listAccounts()
-					.filter( ( row ) => row.email == "spec-user@test.local" );
-
-				expect( listed.len() ).toBe( 1 );
-				expect( listed[ 1 ] ).toHaveKey( "planName" );
-				expect( listed[ 1 ] ).toHaveKey( "appCount" );
-				expect( listed[ 1 ].isAdmin ).toBeFalse();
-			} );
-
-		} );
-
-		/**
-		 * Losing every route into the console is not recoverable through the UI.
-		 */
-		describe( "lockout guards", () => {
-
-			beforeEach( () => seed() );
-			afterEach( () => cleanup() );
-
-			it( "refuses to suspend yourself", () => {
-				var result = variables.admin.setActive( variables.ADMIN_ID, variables.ADMIN_ID, false );
-
-				expect( result.ok ).toBeFalse();
-				expect( result.error ).toInclude( "your own" );
-				expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue();
-			} );
-
-			it( "refuses to revoke your own access", () => {
-				var result = variables.admin.setAdmin( variables.ADMIN_ID, variables.ADMIN_ID, false );
-
-				expect( result.ok ).toBeFalse();
-				expect( variables.admin.isAdmin( variables.ADMIN_ID ) ).toBeTrue();
-			} );
-
-			it( "refuses to remove the last administrator", () => {
-				// Promote the second account, then have it try to demote the first
-				// while it is the only other admin — allowed, because one remains.
-				variables.admin.setAdmin( variables.ADMIN_ID, variables.USER_ID, true );
-				expect( variables.admin.setAdmin( variables.USER_ID, variables.ADMIN_ID, false ).ok ).toBeTrue();
-
-				// Now only USER_ID is an admin among the spec accounts; the real
-				// installation may have others, so assert the rule rather than a count.
-				expect( variables.admin.adminCount() ).toBeGTE( 1 );
-			} );
-
-		} );
-
-	}
-
 }

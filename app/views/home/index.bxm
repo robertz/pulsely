@@ -203,18 +203,18 @@ bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (ord
 					</linearGradient>
 				</defs>
 
-				<!--- backend --->
+				<!--- backend ---> 
 				<rect class="arch-node" x="8" y="112" width="182" height="92" rx="12"/>
 				<text class="arch-label" x="99" y="151" text-anchor="middle">Your backend</text>
 				<text class="arch-sub" x="99" y="173" text-anchor="middle">any language</text>
 
-				<!--- backend to broker --->
+				<!--- backend to broker ---> 
 				<path class="arch-wire" d="M190 158 H378"/>
 				<path class="arch-head" d="m370 152 8 6-8 6"/>
 				<text class="arch-sub" x="284" y="142" text-anchor="middle">signed POST</text>
 				<circle class="arch-packet" cx="0" cy="158" r="4"/>
 
-				<!--- broker --->
+				<!--- broker ---> 
 				<rect class="arch-node is-accent" x="378" y="72" width="214" height="172" rx="14"/>
 				<rect x="400" y="94" width="22" height="22" rx="6" fill="url(##archMark)"/>
 				<text class="arch-label" x="432" y="111">Pulsely</text>
@@ -226,7 +226,7 @@ bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (ord
 				<circle class="arch-dot" cx="405" cy="216" r="3"/>
 				<text class="arch-sub" x="418" y="220">presence roster</text>
 
-				<!--- fan-out --->
+				<!--- fan-out ---> 
 				<path class="arch-wire" d="M592 158 C 670 158, 680 78, 752 78"/>
 				<path class="arch-wire" d="M592 158 H752"/>
 				<path class="arch-wire" d="M592 158 C 670 158, 680 238, 752 238"/>
@@ -238,7 +238,7 @@ bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (ord
 				<circle class="arch-packet is-fan2" cx="0" cy="0" r="3.5"/>
 				<circle class="arch-packet is-fan3" cx="0" cy="0" r="3.5"/>
 
-				<!--- subscribers --->
+				<!--- subscribers ---> 
 				<rect class="arch-node" x="752" y="46" width="220" height="64" rx="11"/>
 				<circle class="arch-live" cx="774" cy="78" r="3.5"/>
 				<text class="arch-label is-sm" x="790" y="74">Browser</text>
@@ -507,33 +507,33 @@ bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (dat
 
 		<div class="price-grid">
 			<bx:loop array="#prc.plans#" index="plan">
-				<div class="price-card#plan.featured ? ' featured' : ''#">
+				<div class="price-card#plan.featured ? " featured" : ""#">
 					<bx:if plan.featured><span class="price-tag">Most popular</span></bx:if>
 
 					<div class="price-name">#encodeForHTML( plan.name )#</div>
 
 					<div class="price-amount">
-						<span class="amount"><bx:if not plan.isFree>$</bx:if>#encodeForHTML( plan.priceLabel )#</span>
-						<bx:if not plan.isFree><span class="per">/ month</span></bx:if>
+						<span class="amount"><bx:if !plan.isFree>$</bx:if>#encodeForHTML( plan.priceLabel )#</span>
+						<bx:if !plan.isFree><span class="per">/ month</span></bx:if>
 					</div>
 					<p class="price-note">
-						<bx:if plan.priceCents eq 0>No credit card required<bx:else>Billed monthly, cancel anytime</bx:if>
+						<bx:if plan.priceCents EQ 0>No credit card required<bx:else>Billed monthly, cancel anytime</bx:if>
 					</p>
 
 					<ul class="price-list">
 						<li><span class="check">&##10003;</span><span><strong>#numberFormat( plan.messageDailyLimit )#</strong> messages / day</span></li>
 						<li><span class="check">&##10003;</span><span><strong>#numberFormat( plan.connectionLimit )#</strong> concurrent connections</span></li>
 
-						<li class="#plan.privateChannels ? '' : 'off'#">
-							<span class="#plan.privateChannels ? 'check' : 'cross'#">#plan.privateChannels ? '&##10003;' : '&##215;'#</span>
+						<li class="#plan.privateChannels ? "" : "off"#">
+							<span class="#plan.privateChannels ? "check" : "cross"#">#plan.privateChannels ? "&##10003;" : "&##215;"#</span>
 							<span>Private channels</span>
 						</li>
-						<li class="#plan.presenceChannels ? '' : 'off'#">
-							<span class="#plan.presenceChannels ? 'check' : 'cross'#">#plan.presenceChannels ? '&##10003;' : '&##215;'#</span>
+						<li class="#plan.presenceChannels ? "" : "off"#">
+							<span class="#plan.presenceChannels ? "check" : "cross"#">#plan.presenceChannels ? "&##10003;" : "&##215;"#</span>
 							<span>Presence channels</span>
 						</li>
-						<li class="#plan.messageHistory ? '' : 'off'#">
-							<span class="#plan.messageHistory ? 'check' : 'cross'#">#plan.messageHistory ? '&##10003;' : '&##215;'#</span>
+						<li class="#plan.messageHistory ? "" : "off"#">
+							<span class="#plan.messageHistory ? "check" : "cross"#">#plan.messageHistory ? "&##10003;" : "&##215;"#</span>
 							<span>
 								<bx:if plan.messageHistory>
 									Message history &mdash; <strong>#plan.retentionHours#h</strong> replay
@@ -544,9 +544,9 @@ bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (dat
 						</li>
 					</ul>
 
-					<a class="btn #plan.featured ? 'btn-primary' : ''# btn-block"
+					<a class="btn #plan.featured ? "btn-primary" : ""# btn-block"
 						href="/dashboard/signup">
-						#plan.priceCents eq 0 ? 'Start free' : 'Choose #encodeForHTML( plan.name )#'#
+						#plan.priceCents EQ 0 ? "Start free" : "Choose #encodeForHTML( plan.name )#"#
 					</a>
 				</div>
 			</bx:loop>

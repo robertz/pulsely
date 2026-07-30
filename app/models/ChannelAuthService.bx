@@ -6,7 +6,6 @@
  * customer's own endpoint, which is the Pusher auth-endpoint model.
  */
 class singleton {
-
 	variables.DSN = "pulsely";
 	variables.WEBHOOK_TIMEOUT_SECONDS = 5;
 
@@ -20,22 +19,25 @@ class singleton {
 	 * so without a deterministic tiebreak two equally-long patterns could
 	 * authorize differently from one request to the next.
 	 */
-	struct function findMatchingRule( required string appId, required string channelName ) {
+	struct function findMatchingRule(
+		required string appId,
+		required string channelName
+	) {
 		var rules = queryExecute(
 			"SELECT channel_pattern, rule_type, auth_webhook_url
 			 FROM   channel_auth_rules
 			 WHERE  app_id = UNHEX(:appId)
 			 ORDER BY CHAR_LENGTH(channel_pattern) DESC, created_at DESC",
-			{ appId : { value : appId, type : "varchar" } },
-			{ datasource : variables.DSN }
+			{ appId: { value: appId, type: "varchar" } },
+			{ datasource: variables.DSN }
 		);
 
 		for ( var row in rules ) {
 			if ( patternMatches( row.channel_pattern, channelName ) ) {
 				return {
-					channelPattern : row.channel_pattern,
-					ruleType       : row.rule_type,
-					authWebhookUrl : row.auth_webhook_url ?: ""
+					channelPattern: row.channel_pattern,
+					ruleType      : row.rule_type,
+					authWebhookUrl: row.auth_webhook_url ?: ""
 				};
 			}
 		}
@@ -47,9 +49,20 @@ class singleton {
 	 * Glob semantics, not STOMP topic semantics: `*` matches any run of characters
 	 * because channel names are opaque strings here, not dot-delimited segments.
 	 */
-	boolean function patternMatches( required string pattern, required string channelName ) {
-		var regex = "^" & reReplace( pattern, "([\.\+\?\^\$\(\)\[\]\{\}\|\\])", "\\\1", "all" )
-			.replace( "*", ".*", "all" ) & "$";
+	boolean function patternMatches(
+		required string pattern,
+		required string channelName
+	) {
+		var regex = "^" & reReplace(
+			pattern,
+			"([\.\+\?\^\$\(\)\[\]\{\}\|\\])",
+			"\\\1",
+			"all"
+		).replace(
+				"*",
+				".*",
+				"all"
+			) & "$";
 		return reFindNoCase( regex, channelName ) > 0;
 	}
 
@@ -58,8 +71,8 @@ class singleton {
 	 * presence channels who the subscriber is.
 	 *
 	 * @return { authorized : boolean, userId : string, userInfo : struct }
-	 *         Authorized is true only on an explicit affirmative. Any transport
-	 *         failure, timeout, non-200 or malformed body denies.
+	 * Authorized is true only on an explicit affirmative. Any transport
+	 * failure, timeout, non-200 or malformed body denies.
 	 */
 	struct function requestAuthorization(
 		required string webhookUrl,
@@ -67,22 +80,27 @@ class singleton {
 		required string socketId,
 		required string userToken
 	) {
-		var denied = { authorized : false, userId : "", userInfo : {} };
+		var denied = { authorized: false, userId: "", userInfo: {} };
 
 		try {
 			bx:http
-				url         = webhookUrl
-				method      = "POST"
-				timeout     = variables.WEBHOOK_TIMEOUT_SECONDS
-				throwOnError= false
-				result      = "local.webhookResult"
+				url         ="#webhookUrl#"
+				method      ="POST"
+				timeout     ="#variables.WEBHOOK_TIMEOUT_SECONDS#"
+				throwOnError="#false#"
+				result      ="local.webhookResult"
 			{
-				bx:httpparam type="header" name="Content-Type" value="application/json";
-				bx:httpparam type="body" value=#jsonSerialize( {
-					"channel_name" : channelName,
-					"socket_id"    : socketId,
-					"user_token"   : userToken
-				} )#;
+				bx:httpparam type ="header" name ="Content-Type" value="application/json";
+				bx:httpparam
+					type ="body"
+					value="#jsonSerialize(
+						{
+							"channel_name": channelName,
+							"socket_id"   : socketId,
+							"user_token"  : userToken
+						}
+					)#"
+				;
 			}
 
 			if ( val( local.webhookResult.status_code ?: 0 ) != 200 ) {
@@ -105,11 +123,11 @@ class singleton {
 			var userInfo = parsed.user_info ?: {};
 
 			return {
-				authorized : true,
-				userId     : toString( parsed.user_id ?: "" ),
-				userInfo   : isStruct( userInfo ) ? userInfo : {}
+				authorized: true,
+				userId    : toString( parsed.user_id ?: "" ),
+				userInfo  : isStruct( userInfo ) ? userInfo : {}
 			};
-		} catch ( any e ) {
+		} catch (any e) {
 			return denied;
 		}
 	}
@@ -123,7 +141,11 @@ class singleton {
 		required string socketId,
 		required string userToken
 	) {
-		return requestAuthorization( webhookUrl, channelName, socketId, userToken ).authorized;
+		return requestAuthorization(
+			webhookUrl,
+			channelName,
+			socketId,
+			userToken
+		).authorized;
 	}
-
 }

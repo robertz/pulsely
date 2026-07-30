@@ -10,7 +10,6 @@
  * rest of the broker is built on (see PresenceService, which this mirrors).
  */
 class singleton {
-
 	variables.STORE_KEY = "pulselyWatchlist";
 
 	function init() {
@@ -22,12 +21,16 @@ class singleton {
 	 * Record a connection as signed in as this user, for this app.
 	 *
 	 * @return { wasFirstConnection : boolean } — true only when this is the
-	 *         user's first signed-in connection to this app.
+	 * user's first signed-in connection to this app.
 	 */
-	struct function signIn( required string appId, required string userId, required string connectionId ) {
+	struct function signIn(
+		required string appId,
+		required string userId,
+		required string connectionId
+	) {
 		var store = ensureStore();
 
-		lock name="pulselyWatchlist-#appId#-#hash( userId )#" type="exclusive" timeout="5" {
+		lock name   ="pulselyWatchlist-#appId#-#hash( userId )#" type   ="exclusive" timeout="5" {
 			var users = store[ appId ] ?: {};
 			var connections = users[ userId ] ?: {};
 			var wasFirst = connections.isEmpty();
@@ -36,23 +39,27 @@ class singleton {
 			users[ userId ] = connections;
 			store[ appId ] = users;
 
-			return { wasFirstConnection : wasFirst };
+			return { wasFirstConnection: wasFirst };
 		}
 	}
 
 	/**
 	 * @return { wasLastConnection : boolean } — true only when the user's last
-	 *         signed-in connection to this app has gone.
+	 * signed-in connection to this app has gone.
 	 */
-	struct function signOut( required string appId, required string userId, required string connectionId ) {
+	struct function signOut(
+		required string appId,
+		required string userId,
+		required string connectionId
+	) {
 		var store = ensureStore();
 
-		lock name="pulselyWatchlist-#appId#-#hash( userId )#" type="exclusive" timeout="5" {
+		lock name   ="pulselyWatchlist-#appId#-#hash( userId )#" type   ="exclusive" timeout="5" {
 			var users = store[ appId ] ?: {};
 			var connections = users[ userId ] ?: {};
 
 			if ( !connections.keyExists( connectionId ) ) {
-				return { wasLastConnection : false };
+				return { wasLastConnection: false };
 			}
 
 			connections.delete( connectionId );
@@ -64,7 +71,7 @@ class singleton {
 			}
 			store[ appId ] = users;
 
-			return { wasLastConnection : connections.isEmpty() };
+			return { wasLastConnection: connections.isEmpty() };
 		}
 	}
 
@@ -74,15 +81,27 @@ class singleton {
 	 *
 	 * @return array of { userId, wasLastConnection }
 	 */
-	array function signOutAllForConnection( required string appId, required string connectionId ) {
+	array function signOutAllForConnection(
+		required string appId,
+		required string connectionId
+	) {
 		var store = ensureStore();
 		var users = store[ appId ] ?: {};
 		var departures = [];
 
 		for ( var userId in users.keyArray() ) {
 			if ( ( users[ userId ] ?: {} ).keyExists( connectionId ) ) {
-				var result = signOut( appId, userId, connectionId );
-				departures.append( { "userId" : userId, "wasLastConnection" : result.wasLastConnection } );
+				var result = signOut(
+					appId,
+					userId,
+					connectionId
+				);
+				departures.append(
+						{
+							"userId"           : userId,
+							"wasLastConnection": result.wasLastConnection
+						}
+					);
 			}
 		}
 
@@ -100,7 +119,7 @@ class singleton {
 
 	private struct function ensureStore() {
 		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name="pulselyWatchlistInit" type="exclusive" timeout="10" {
+			lock name   ="pulselyWatchlistInit" type   ="exclusive" timeout="10" {
 				if ( !application.keyExists( variables.STORE_KEY ) ) {
 					application[ variables.STORE_KEY ] = {};
 				}
@@ -108,5 +127,4 @@ class singleton {
 		}
 		return application[ variables.STORE_KEY ];
 	}
-
 }

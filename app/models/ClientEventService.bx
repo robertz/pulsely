@@ -4,17 +4,16 @@
  * Client publishing is the one path where an untrusted party decides what goes on
  * the wire, so it is deliberately narrow:
  *
- *   - off unless the app opts in
- *   - private/presence channels only, never public ones
- *   - event names must start with `client-`, so a client can never impersonate a
- *     server-published event your handlers already trust
- *   - rate limited per connection
+ * - off unless the app opts in
+ * - private/presence channels only, never public ones
+ * - event names must start with `client-`, so a client can never impersonate a
+ * server-published event your handlers already trust
+ * - rate limited per connection
  *
  * The per-connection budget is a sliding one-second window held in the
  * application scope, matching the single-node assumption used elsewhere.
  */
 class singleton {
-
 	variables.STORE_KEY = "pulselyClientEventRates";
 	variables.EVENT_PREFIX = "client-";
 	variables.MAX_EVENTS_PER_SECOND = 10;
@@ -54,8 +53,8 @@ class singleton {
 		var store = ensureStore();
 		var second = int( getTickCount() / 1000 );
 
-		lock name="pulselyClientRate-#connectionId#" type="exclusive" timeout="5" {
-			var record = store[ connectionId ] ?: { second : second, count : 0 };
+		lock name   ="pulselyClientRate-#connectionId#" type   ="exclusive" timeout="5" {
+			var record = store[ connectionId ] ?: { second: second, count: 0 };
 
 			if ( record.second != second ) {
 				record.second = second;
@@ -102,7 +101,7 @@ class singleton {
 
 	private struct function ensureStore() {
 		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name="pulselyClientRateInit" type="exclusive" timeout="10" {
+			lock name   ="pulselyClientRateInit" type   ="exclusive" timeout="10" {
 				if ( !application.keyExists( variables.STORE_KEY ) ) {
 					application[ variables.STORE_KEY ] = {};
 				}
@@ -110,5 +109,4 @@ class singleton {
 		}
 		return application[ variables.STORE_KEY ];
 	}
-
 }

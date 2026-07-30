@@ -6,24 +6,21 @@
 class {
 
 	function configure() {
-
 		variables.coldbox = {
-			appName                  : "pulsely",
+			appName                : "pulsely",
 			// Dependencies install to lib/modules in this layout, which is outside
 			// the ColdBox app root, so it has to be pointed at them explicitly.
-			modulesExternalLocation  : [ "/modules" ],
-			handlersIndexAutoReload  : true,
-			handlerCaching           : false,
-			eventCaching             : false,
-			defaultEvent             : "Home.index",
-			requestStartHandler      : "",
-			reinitPassword           : "",
-			customErrorTemplate      : "/coldbox/system/exceptions/Whoops.cfm"
+			modulesExternalLocation: [ "/modules"],
+			handlersIndexAutoReload: true,
+			handlerCaching         : false,
+			eventCaching           : false,
+			defaultEvent           : "Home.index",
+			requestStartHandler    : "",
+			reinitPassword         : "",
+			customErrorTemplate    : "/coldbox/system/exceptions/Whoops.cfm"
 		};
 
-		variables.environments = {
-			development : "localhost,127\.0\.0\.1"
-		};
+		variables.environments = { development: "localhost,127\.0\.0\.1" };
 
 		// ColdBox's own default LogBox config registers the console appender by
 		// its short class name ("ConsoleAppender"), which Adobe/Lucee resolve via
@@ -31,19 +28,19 @@ class {
 		// implicit lookup, so it throws ClassNotFoundBoxLangException on boot -
 		// use the fully-qualified path instead.
 		variables.logBox = {
-			appenders : { console : { class : "coldbox.system.logging.appenders.ConsoleAppender" } },
-			root      : { levelmax : "INFO", appenders : "*" }
+			appenders: { console: { class: "coldbox.system.logging.appenders.ConsoleAppender" } },
+			root     : { levelmax: "INFO", appenders: "*" }
 		};
 
 		variables.moduleSettings = {
-			cbcsrf : {
+			cbcsrf: {
 				// Verification is done in Dashboard.preHandler() rather than by the
 				// module's auto-verifier. The verifier throws from an interceptor
 				// during preProcess, which sits outside the event lifecycle, so the
 				// exception handler cannot turn it into a friendly 403 — a user with
 				// a stale tab would just get a 500.
-				enableAutoVerifier : false,
-				rotationTimeout    : 30
+				enableAutoVerifier: false,
+				rotationTimeout   : 30
 			}
 		};
 
@@ -51,9 +48,7 @@ class {
 
 		variables.settings = {
 			// Clock skew tolerance for trigger-API HMAC signatures.
-			triggerAuthWindowSeconds : 600
+			triggerAuthWindowSeconds: 600
 		};
-
 	}
-
 }

@@ -10,10 +10,9 @@ class {
 
 	function index( event, rc, prc ) {
 		return event.renderData(
-			type       = "json",
-			data       = { "status" : "ok" },
-			statusCode = 200
-		);
+				type       = "json",
+				data       = { "status": "ok" },
+				statusCode = 200
+			);
 	}
-
 }

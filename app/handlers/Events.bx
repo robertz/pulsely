@@ -2,16 +2,19 @@
  * Server-side trigger API — the only path by which customers publish.
  *
  * POST /apps/{appId}/events
- *   headers: X-Pulsely-Timestamp, X-Pulsely-Signature
- *   body:    { "channel": "orders", "event": "created", "data": { ... } }
+ * headers: X-Pulsely-Timestamp, X-Pulsely-Signature
+ * body:    { "channel": "orders", "event": "created", "data": { ... } }
  */
 class {
+	property name="appService" inject="AppService";
 
-	property name="appService"       inject="AppService";
 	property name="signatureService" inject="SignatureService";
-	property name="meteringService"  inject="MeteringService";
-	property name="historyService"   inject="HistoryService";
-	property name="opsService"       inject="OpsService";
+
+	property name="meteringService" inject="MeteringService";
+
+	property name="historyService" inject="HistoryService";
+
+	property name="opsService" inject="OpsService";
 
 	function trigger( event, rc, prc ) {
 		event.getResponse().setFormat( "json" );
@@ -20,100 +23,151 @@ class {
 		var tenantApp = appService.getActiveAppById( appId );
 
 		if ( tenantApp.isEmpty() ) {
-			return respond( event, 404, { "error" : "Unknown or inactive app." } );
+			return respond(
+				event,
+				404,
+				{ "error": "Unknown or inactive app." }
+			);
 		}
 
-		var rawBody   = event.getHTTPContent();
+		var rawBody = event.getHTTPContent();
 		var timestamp = event.getHTTPHeader( "X-Pulsely-Timestamp", "" );
 		var signature = event.getHTTPHeader( "X-Pulsely-Signature", "" );
 
-		var authWindow = val( getSetting( name = "triggerAuthWindowSeconds", defaultValue = 600 ) );
-
-		var signatureOK = signatureService.verify(
-			tenantApp.appSecret,
-			"POST",
-			"/apps/#appId#/events",
-			timestamp,
-			rawBody,
-			signature,
-			authWindow
+		var authWindow = val(
+			getSetting( name = "triggerAuthWindowSeconds", defaultValue = 600 )
 		);
 
+		var signatureOK = signatureService.verify(
+				tenantApp.appSecret,
+				"POST",
+				"/apps/#appId#/events",
+				timestamp,
+				rawBody,
+				signature,
+				authWindow
+			);
+
 		if ( !signatureOK ) {
-			return respond( event, 401, { "error" : "Invalid signature." } );
+			return respond(
+				event,
+				401,
+				{ "error": "Invalid signature." }
+			);
 		}
 
 		if ( !isJSON( rawBody ) ) {
-			return respond( event, 400, { "error" : "Body must be JSON." } );
+			return respond(
+				event,
+				400,
+				{ "error": "Body must be JSON." }
+			);
 		}
 
 		var payload = jsonDeserialize( rawBody );
 		var channelName = trim( payload.channel ?: "" );
-		var eventName   = trim( payload.event ?: "" );
+		var eventName = trim( payload.event ?: "" );
 
 		if ( !channelName.len() || !eventName.len() ) {
-			return respond( event, 400, { "error" : "Both 'channel' and 'event' are required." } );
+			return respond(
+				event,
+				400,
+				{ "error": "Both 'channel' and 'event' are required." }
+			);
 		}
 
 		// A dot is the destination separator, so a channel name containing one
 		// could otherwise be crafted to address a sibling app's namespace.
 		if ( channelName.find( "." ) ) {
-			return respond( event, 400, { "error" : "Channel names may not contain '.'" } );
+			return respond(
+				event,
+				400,
+				{ "error": "Channel names may not contain '.'" }
+			);
 		}
 
 		// `$` is reserved for internal destinations such as the dashboard ops feed.
 		if ( channelName.startsWith( "$" ) ) {
-			return respond( event, 400, { "error" : "Channel names may not begin with '$'." } );
+			return respond(
+				event,
+				400,
+				{ "error": "Channel names may not begin with '$'." }
+			);
 		}
 
 		var dailyLimit = val( tenantApp.messageDailyLimit ?: 0 );
 		if ( dailyLimit > 0 && meteringService.getMessagesSentToday( appId ) >= dailyLimit ) {
-			return respond( event, 429, {
-				"error" : "Daily message limit reached for plan [#tenantApp.planName ?: 'none'#]."
-			} );
+			return respond(
+				event,
+				429,
+				{ "error": "Daily message limit reached for plan [#tenantApp.planName ?: "none"#]." }
+			);
 		}
 
 		var envelope = {
-			"event" : eventName,
-			"data"  : payload.data ?: {}
+			"event": eventName,
+			"data" : payload.data ?: {}
 		};
 
 		getWebSocketBroker().send(
-			"#appId#.#channelName#",
-			jsonSerialize( envelope ),
-			{ "content-type" : "application/json" }
-		);
+				"#appId#.#channelName#",
+				jsonSerialize( envelope ),
+				{ "content-type": "application/json" }
+			);
 
 		meteringService.recordMessages( appId, 1 );
 
 		if ( appService.flagEnabled( tenantApp.allowsMessageHistory ?: false ) ) {
 			// Only the data payload — event_name is its own column, and storing the
 			// whole envelope would nest it under "data" again on replay.
-			historyService.record( appId, channelName, eventName, jsonSerialize( envelope.data ) );
+			historyService.record(
+					appId,
+					channelName,
+					eventName,
+					jsonSerialize( envelope.data )
+				);
 		}
 
-		publishOps( appId, channelName, eventName );
+		publishOps(
+			appId,
+			channelName,
+			eventName
+		);
 
-		return respond( event, 200, { "status" : "ok" } );
+		return respond(
+			event,
+			200,
+			{ "status": "ok" }
+		);
 	}
 
 	/**
 	 * Feeds the dashboard's live tiles. Ops events are not metered — they are our
 	 * own traffic, not the customer's — and never break a customer publish.
 	 */
-	private function publishOps( required string appId, required string channelName, required string eventName ) {
+	private function publishOps(
+		required string appId,
+		required string channelName,
+		required string eventName
+	) {
 		try {
 			getWebSocketBroker().send(
-				opsService.opsDestination( appId ),
-				jsonSerialize( opsService.envelope( "message.published", {
-					"channel"       : channelName,
-					"event"         : eventName,
-					"messagesToday" : meteringService.getMessagesSentToday( appId ),
-					"at"            : dateTimeFormat( now(), "HH:nn:ss" )
-				} ) ),
-				{ "content-type" : "application/json" }
-			);
-		} catch ( any e ) {
+					opsService.opsDestination( appId ),
+					jsonSerialize(
+						opsService.envelope(
+								"message.published",
+								{
+									"channel"      : channelName,
+									"event"        : eventName,
+									"messagesToday": meteringService.getMessagesSentToday( appId ),
+									"at"           : dateTimeFormat( now(), "HH:nn:ss" )
+								}
+							)
+					),
+					{ "content-type": "application/json" }
+				);
+		} catch (any e) {
+
 		}
 	}
 
@@ -125,9 +179,19 @@ class {
 		return new wwwroot.WebSocket();
 	}
 
-	private function respond( required event, required numeric statusCode, required struct body ) {
-		event.getResponse().setStatusCode( statusCode ).setData( body );
-		return event.renderData( type = "json", data = body, statusCode = statusCode );
+	private function respond(
+		required event,
+		required numeric statusCode,
+		required struct body
+	) {
+		event
+			.getResponse()
+			.setStatusCode( statusCode )
+			.setData( body );
+		return event.renderData(
+				type       = "json",
+				data       = body,
+				statusCode = statusCode
+			);
 	}
-
 }

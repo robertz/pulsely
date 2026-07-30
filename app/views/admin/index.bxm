@@ -38,7 +38,7 @@
 							<select name="planId" onchange="this.form.submit()">
 								<bx:loop array="#prc.plans#" index="plan">
 									<option value="#encodeForHTMLAttribute( plan.planId )#"
-										<bx:if plan.name eq row.planName>selected</bx:if>>#encodeForHTML( plan.name )#</option>
+										<bx:if plan.name EQ row.planName>selected</bx:if>>#encodeForHTML( plan.name )#</option>
 								</bx:loop>
 							</select>
 							<noscript><button class="btn btn-sm" type="submit">Set</button></noscript>
@@ -59,8 +59,8 @@
 							<input type="hidden" name="accountId" value="#encodeForHTMLAttribute( row.accountId )#">
 							<input type="hidden" name="active" value="#row.isActive ? 1 : 0#">
 							<button class="btn btn-ghost btn-sm" type="submit"
-								<bx:if row.accountId eq prc.account.accountId>disabled title="You cannot suspend your own account"</bx:if>>
-								#row.isActive ? 'Suspend' : 'Reactivate'#
+								<bx:if row.accountId EQ prc.account.accountId>disabled title="You cannot suspend your own account"</bx:if>>
+								#row.isActive ? "Suspend" : "Reactivate"#
 							</button>
 						</form>
 						<form method="post" action="/admin/setAdmin">
@@ -68,8 +68,8 @@
 							<input type="hidden" name="accountId" value="#encodeForHTMLAttribute( row.accountId )#">
 							<input type="hidden" name="admin" value="#row.isAdmin ? 1 : 0#">
 							<button class="btn btn-ghost btn-sm" type="submit"
-								<bx:if row.accountId eq prc.account.accountId>disabled title="You cannot remove your own access"</bx:if>>
-								#row.isAdmin ? 'Revoke admin' : 'Make admin'#
+								<bx:if row.accountId EQ prc.account.accountId>disabled title="You cannot remove your own access"</bx:if>>
+								#row.isAdmin ? "Revoke admin" : "Make admin"#
 							</button>
 						</form>
 					</td>

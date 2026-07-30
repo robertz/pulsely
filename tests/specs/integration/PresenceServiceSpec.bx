@@ -1,5 +1,4 @@
 class extends="testbox.system.BaseSpec" {
-
 	variables.DEST = "22222222222222222222222222222222.presence-lobby";
 	variables.OTHER_DEST = "22222222222222222222222222222222.presence-room";
 
@@ -7,184 +6,336 @@ class extends="testbox.system.BaseSpec" {
 		variables.presence = new app.models.PresenceService();
 	}
 
+	function run() {
+		describe(
+			"join()",
+			() => {
+				beforeEach( () => reset() );
+
+				it(
+					"reports the first arrival as a new member",
+					() => {
+						var result = variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a",
+								{ "name": "Ada" }
+							);
+
+						expect( result.added ).toBeTrue();
+						expect( result.member.user_id ).toBe( "user-a" );
+						expect( result
+								.member
+								.user_info
+								.name ).toBe( "Ada" );
+					}
+				);
+
+				it(
+					"lists the member once they have joined",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a",
+								{ "name": "Ada" }
+							);
+
+						var members = variables.presence.members( variables.DEST );
+						expect( members.len() ).toBe( 1 );
+						expect( members[ 1 ].user_id ).toBe( "user-a" );
+					}
+				);
+
+				/**
+				 * A second tab is a second connection but not a second member. Announcing
+				 * it would show a join that never happened.
+				 */
+				it(
+					"does not re-announce a user who is already present",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						var second = variables.presence.join(
+								variables.DEST,
+								"conn-2",
+								"user-a"
+							);
+
+						expect( second.added ).toBeFalse();
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
+						expect( variables.presence.connectionCount( variables.DEST ) ).toBe( 2 );
+					}
+				);
+
+				it(
+					"announces genuinely different users",
+					() => {
+						expect( variables.presence.join(
+									variables.DEST,
+									"conn-1",
+									"user-a"
+								).added ).toBeTrue();
+						expect( variables.presence.join(
+									variables.DEST,
+									"conn-2",
+									"user-b"
+								).added ).toBeTrue();
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 2 );
+					}
+				);
+
+				it(
+					"keeps channels independent",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.OTHER_DEST,
+								"conn-2",
+								"user-b"
+							);
+
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
+						expect( variables.presence.memberCount( variables.OTHER_DEST ) ).toBe( 1 );
+						expect( variables.presence.members( variables.DEST )[ 1 ].user_id ).toBe( "user-a" );
+					}
+				);
+			}
+		);
+
+		describe(
+			"leave()",
+			() => {
+				beforeEach( () => reset() );
+
+				it(
+					"removes a member on their only connection leaving",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+
+						var result = variables.presence.leave( variables.DEST, "conn-1" );
+
+						expect( result.removed ).toBeTrue();
+						expect( result.member.user_id ).toBe( "user-a" );
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 0 );
+					}
+				);
+
+				/**
+				 * Closing one of two tabs must not tell the room that the user left.
+				 */
+				it(
+					"keeps a user present while another connection of theirs remains",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.DEST,
+								"conn-2",
+								"user-a"
+							);
+
+						var result = variables.presence.leave( variables.DEST, "conn-1" );
+
+						expect( result.removed ).toBeFalse();
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
+
+						expect( variables.presence.leave( variables.DEST, "conn-2" ).removed ).toBeTrue();
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 0 );
+					}
+				);
+
+				it(
+					"is a no-op for a connection that was never present",
+					() => {
+						var result = variables.presence.leave( variables.DEST, "ghost" );
+
+						expect( result.removed ).toBeFalse();
+						expect( result.member ).toBeEmpty();
+					}
+				);
+
+				it(
+					"forgets the channel once it is empty",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.leave( variables.DEST, "conn-1" );
+
+						expect( variables.presence.connectionCount( variables.DEST ) ).toBe( 0 );
+						expect( variables.presence.members( variables.DEST ) ).toBeEmpty();
+					}
+				);
+			}
+		);
+
+		describe(
+			"leaveAll()",
+			() => {
+				beforeEach( () => reset() );
+
+				/**
+				 * A dropped socket never unsubscribes, so this is what stops a member
+				 * lingering in the room forever.
+				 */
+				it(
+					"drops a connection from every channel it was in",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.OTHER_DEST,
+								"conn-1",
+								"user-a"
+							);
+
+						var departures = variables.presence.leaveAll( "conn-1" );
+
+						expect( departures.len() ).toBe( 2 );
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 0 );
+						expect( variables.presence.memberCount( variables.OTHER_DEST ) ).toBe( 0 );
+					}
+				);
+
+				it(
+					"flags only the departures that emptied a user out",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.DEST,
+								"conn-2",
+								"user-a"
+							);
+
+						var departures = variables.presence.leaveAll( "conn-1" );
+
+						expect( departures.len() ).toBe( 1 );
+						expect( departures[ 1 ].removed ).toBeFalse( "the other tab is still there" );
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
+					}
+				);
+
+				it(
+					"leaves other connections alone",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.DEST,
+								"conn-2",
+								"user-b"
+							);
+
+						variables.presence.leaveAll( "conn-1" );
+
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
+						expect( variables.presence.members( variables.DEST )[ 1 ].user_id ).toBe( "user-b" );
+					}
+				);
+
+				it(
+					"is a no-op for an unknown connection",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+
+						expect( variables.presence.leaveAll( "nobody" ) ).toBeEmpty();
+						expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
+					}
+				);
+			}
+		);
+
+		describe(
+			"members()",
+			() => {
+				beforeEach( () => reset() );
+
+				it(
+					"reports each user once regardless of connection count",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.DEST,
+								"conn-2",
+								"user-a"
+							);
+						variables.presence.join(
+								variables.DEST,
+								"conn-3",
+								"user-b"
+							);
+
+						expect( variables
+								.presence
+								.members( variables.DEST )
+								.len() ).toBe( 2 );
+					}
+				);
+
+				it(
+					"carries the user info the auth endpoint supplied",
+					() => {
+						variables.presence.join(
+								variables.DEST,
+								"conn-1",
+								"user-a",
+								{ "name": "Ada", "role": "admin" }
+							);
+
+						var member = variables.presence.members( variables.DEST )[ 1 ];
+						expect( member.user_info.name ).toBe( "Ada" );
+						expect( member.user_info.role ).toBe( "admin" );
+					}
+				);
+
+				it(
+					"is empty for a channel nobody has joined",
+					() => {
+						expect(
+							variables.presence.members( "22222222222222222222222222222222.presence-void" )
+						).toBeEmpty();
+					}
+				);
+			}
+		);
+	}
+
 	private function reset() {
 		variables.presence.clearAll();
 	}
-
-	function run() {
-
-		describe( "join()", () => {
-
-			beforeEach( () => reset() );
-
-			it( "reports the first arrival as a new member", () => {
-				var result = variables.presence.join( variables.DEST, "conn-1", "user-a", { "name" : "Ada" } );
-
-				expect( result.added ).toBeTrue();
-				expect( result.member.user_id ).toBe( "user-a" );
-				expect( result.member.user_info.name ).toBe( "Ada" );
-			} );
-
-			it( "lists the member once they have joined", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a", { "name" : "Ada" } );
-
-				var members = variables.presence.members( variables.DEST );
-				expect( members.len() ).toBe( 1 );
-				expect( members[ 1 ].user_id ).toBe( "user-a" );
-			} );
-
-			/**
-			 * A second tab is a second connection but not a second member. Announcing
-			 * it would show a join that never happened.
-			 */
-			it( "does not re-announce a user who is already present", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				var second = variables.presence.join( variables.DEST, "conn-2", "user-a" );
-
-				expect( second.added ).toBeFalse();
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
-				expect( variables.presence.connectionCount( variables.DEST ) ).toBe( 2 );
-			} );
-
-			it( "announces genuinely different users", () => {
-				expect( variables.presence.join( variables.DEST, "conn-1", "user-a" ).added ).toBeTrue();
-				expect( variables.presence.join( variables.DEST, "conn-2", "user-b" ).added ).toBeTrue();
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 2 );
-			} );
-
-			it( "keeps channels independent", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.join( variables.OTHER_DEST, "conn-2", "user-b" );
-
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
-				expect( variables.presence.memberCount( variables.OTHER_DEST ) ).toBe( 1 );
-				expect( variables.presence.members( variables.DEST )[ 1 ].user_id ).toBe( "user-a" );
-			} );
-
-		} );
-
-		describe( "leave()", () => {
-
-			beforeEach( () => reset() );
-
-			it( "removes a member on their only connection leaving", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-
-				var result = variables.presence.leave( variables.DEST, "conn-1" );
-
-				expect( result.removed ).toBeTrue();
-				expect( result.member.user_id ).toBe( "user-a" );
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 0 );
-			} );
-
-			/**
-			 * Closing one of two tabs must not tell the room that the user left.
-			 */
-			it( "keeps a user present while another connection of theirs remains", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.join( variables.DEST, "conn-2", "user-a" );
-
-				var result = variables.presence.leave( variables.DEST, "conn-1" );
-
-				expect( result.removed ).toBeFalse();
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
-
-				expect( variables.presence.leave( variables.DEST, "conn-2" ).removed ).toBeTrue();
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 0 );
-			} );
-
-			it( "is a no-op for a connection that was never present", () => {
-				var result = variables.presence.leave( variables.DEST, "ghost" );
-
-				expect( result.removed ).toBeFalse();
-				expect( result.member ).toBeEmpty();
-			} );
-
-			it( "forgets the channel once it is empty", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.leave( variables.DEST, "conn-1" );
-
-				expect( variables.presence.connectionCount( variables.DEST ) ).toBe( 0 );
-				expect( variables.presence.members( variables.DEST ) ).toBeEmpty();
-			} );
-
-		} );
-
-		describe( "leaveAll()", () => {
-
-			beforeEach( () => reset() );
-
-			/**
-			 * A dropped socket never unsubscribes, so this is what stops a member
-			 * lingering in the room forever.
-			 */
-			it( "drops a connection from every channel it was in", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.join( variables.OTHER_DEST, "conn-1", "user-a" );
-
-				var departures = variables.presence.leaveAll( "conn-1" );
-
-				expect( departures.len() ).toBe( 2 );
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 0 );
-				expect( variables.presence.memberCount( variables.OTHER_DEST ) ).toBe( 0 );
-			} );
-
-			it( "flags only the departures that emptied a user out", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.join( variables.DEST, "conn-2", "user-a" );
-
-				var departures = variables.presence.leaveAll( "conn-1" );
-
-				expect( departures.len() ).toBe( 1 );
-				expect( departures[ 1 ].removed ).toBeFalse( "the other tab is still there" );
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
-			} );
-
-			it( "leaves other connections alone", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.join( variables.DEST, "conn-2", "user-b" );
-
-				variables.presence.leaveAll( "conn-1" );
-
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
-				expect( variables.presence.members( variables.DEST )[ 1 ].user_id ).toBe( "user-b" );
-			} );
-
-			it( "is a no-op for an unknown connection", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-
-				expect( variables.presence.leaveAll( "nobody" ) ).toBeEmpty();
-				expect( variables.presence.memberCount( variables.DEST ) ).toBe( 1 );
-			} );
-
-		} );
-
-		describe( "members()", () => {
-
-			beforeEach( () => reset() );
-
-			it( "reports each user once regardless of connection count", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a" );
-				variables.presence.join( variables.DEST, "conn-2", "user-a" );
-				variables.presence.join( variables.DEST, "conn-3", "user-b" );
-
-				expect( variables.presence.members( variables.DEST ).len() ).toBe( 2 );
-			} );
-
-			it( "carries the user info the auth endpoint supplied", () => {
-				variables.presence.join( variables.DEST, "conn-1", "user-a", { "name" : "Ada", "role" : "admin" } );
-
-				var member = variables.presence.members( variables.DEST )[ 1 ];
-				expect( member.user_info.name ).toBe( "Ada" );
-				expect( member.user_info.role ).toBe( "admin" );
-			} );
-
-			it( "is empty for a channel nobody has joined", () => {
-				expect( variables.presence.members( "22222222222222222222222222222222.presence-void" ) ).toBeEmpty();
-			} );
-
-		} );
-
-	}
-
 }

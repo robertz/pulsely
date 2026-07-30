@@ -2,13 +2,21 @@
  * Customer-facing dashboard surfaces.
  */
 class {
+	property name="accountService" inject="AccountService";
 
-	property name="accountService"  inject="AccountService";
-	property name="opsService"      inject="OpsService";
-	property name="loginThrottle"   inject="LoginThrottleService";
-	property name="webhookService"  inject="WebhookService";
+	property name="opsService" inject="OpsService";
 
-	function preHandler( event, rc, prc, action, eventArguments ) {
+	property name="loginThrottle" inject="LoginThrottleService";
+
+	property name="webhookService" inject="WebhookService";
+
+	function preHandler(
+		event,
+		rc,
+		prc,
+		action,
+		eventArguments
+	) {
 		prc.account = session.account ?: {};
 
 		// Fail closed: every state-changing request into this handler must carry a
@@ -24,7 +32,7 @@ class {
 			}
 		}
 
-		var isPublic = [ "login", "doLogin", "logout", "signup", "doSignup" ].findNoCase( action ) > 0;
+		var isPublic = [ "login", "doLogin", "logout", "signup", "doSignup"].findNoCase( action ) > 0;
 		if ( !isPublic && prc.account.isEmpty() ) {
 			relocate( "dashboard/login" );
 		}
@@ -61,7 +69,10 @@ class {
 
 		if ( account.isEmpty() ) {
 			loginThrottle.recordFailure( clientIP, email );
-			relocate( url = "/dashboard/login", queryString = "error=Invalid%20email%20or%20password" );
+			relocate(
+				url         = "/dashboard/login",
+				queryString = "error=Invalid%20email%20or%20password"
+			);
 			return;
 		}
 
@@ -75,23 +86,23 @@ class {
 			relocate( "dashboard" );
 		}
 		prc.signupError = "";
-		prc.entered = { email : "", name : "" };
+		prc.entered = { email: "", name: "" };
 		event.setView( view = "dashboard/signup", layout = "Bare" );
 	}
 
 	function doSignup( event, rc, prc ) {
 		var result = accountService.createAccount(
-			rc.email ?: "",
-			rc.name ?: "",
-			rc.password ?: "",
-			rc.confirmPassword ?: ""
-		);
+				rc.email ?: "",
+				rc.name ?: "",
+				rc.password ?: "",
+				rc.confirmPassword ?: ""
+			);
 
 		if ( result.keyExists( "error" ) ) {
 			// Rendered rather than relocated so what they typed survives the round
 			// trip; the passwords deliberately do not.
 			prc.signupError = result.error;
-			prc.entered = { email : rc.email ?: "", name : rc.name ?: "" };
+			prc.entered = { email: rc.email ?: "", name: rc.name ?: "" };
 			event.setView( view = "dashboard/signup", layout = "Bare" );
 			return;
 		}
@@ -120,17 +131,17 @@ class {
 			return;
 		}
 
-		prc.usageSeries    = accountService.getUsageSeries( prc.account.accountId, prc.app.appId );
-		prc.authRules      = accountService.getAuthRules( prc.account.accountId, prc.app.appId );
+		prc.usageSeries = accountService.getUsageSeries( prc.account.accountId, prc.app.appId );
+		prc.authRules = accountService.getAuthRules( prc.account.accountId, prc.app.appId );
 		prc.recentMessages = accountService.getRecentMessages( prc.account.accountId, prc.app.appId );
 
 		// Scoped to this app and short-lived, so the page can subscribe to its own
 		// ops feed without the app secret ever reaching the browser.
-		prc.opsToken   = opsService.mintOpsToken( prc.app.app_key, prc.app.app_secret );
+		prc.opsToken = opsService.mintOpsToken( prc.app.app_key, prc.app.app_secret );
 		prc.opsChannel = opsService.opsChannel();
 
-		prc.webhooks         = webhookService.getWebhooks( prc.app.appId );
-		prc.webhookEvents    = webhookService.eventTypes();
+		prc.webhooks = webhookService.getWebhooks( prc.app.appId );
+		prc.webhookEvents = webhookService.eventTypes();
 		prc.webhookDeliveries = webhookService.getRecentDeliveries( prc.app.appId, 10 );
 
 		event.setView( "dashboard/app" );
@@ -148,11 +159,11 @@ class {
 
 	function toggleApp( event, rc, prc ) {
 		accountService.setAppActive(
-			prc.account.accountId,
-			rc.appId ?: "",
-			!( ( rc.active ?: "0" ) == "1" )
-		);
-		relocate( url = "/dashboard/app/#rc.appId ?: ''#" );
+				prc.account.accountId,
+				rc.appId ?: "",
+				!( ( rc.active ?: "0" ) == "1" )
+			);
+		relocate( url = "/dashboard/app/#rc.appId ?: ""#" );
 	}
 
 	function addWebhook( event, rc, prc ) {
@@ -161,10 +172,10 @@ class {
 		// Scoped through getApp so a guessed app id cannot have an endpoint attached.
 		if ( !accountService.getApp( prc.account.accountId, appId ).isEmpty() ) {
 			webhookService.addWebhook(
-				appId,
-				rc.url ?: "",
-				( rc.events ?: "" ).listToArray()
-			);
+					appId,
+					rc.url ?: "",
+					( rc.events ?: "" ).listToArray()
+				);
 		}
 		relocate( url = "/dashboard/app/#appId#" );
 	}
@@ -180,27 +191,26 @@ class {
 
 	function toggleClientEvents( event, rc, prc ) {
 		accountService.setClientEvents(
-			prc.account.accountId,
-			rc.appId ?: "",
-			!( ( rc.enabled ?: "0" ) == "1" )
-		);
-		relocate( url = "/dashboard/app/#rc.appId ?: ''#" );
+				prc.account.accountId,
+				rc.appId ?: "",
+				!( ( rc.enabled ?: "0" ) == "1" )
+			);
+		relocate( url = "/dashboard/app/#rc.appId ?: ""#" );
 	}
 
 	function addRule( event, rc, prc ) {
 		accountService.addAuthRule(
-			prc.account.accountId,
-			rc.appId ?: "",
-			rc.channelPattern ?: "",
-			rc.ruleType ?: "private",
-			rc.authWebhookUrl ?: ""
-		);
-		relocate( url = "/dashboard/app/#rc.appId ?: ''#" );
+				prc.account.accountId,
+				rc.appId ?: "",
+				rc.channelPattern ?: "",
+				rc.ruleType ?: "private",
+				rc.authWebhookUrl ?: ""
+			);
+		relocate( url = "/dashboard/app/#rc.appId ?: ""#" );
 	}
 
 	function deleteRule( event, rc, prc ) {
 		accountService.deleteAuthRule( prc.account.accountId, rc.ruleId ?: "" );
-		relocate( url = "/dashboard/app/#rc.appId ?: ''#" );
+		relocate( url = "/dashboard/app/#rc.appId ?: ""#" );
 	}
-
 }
