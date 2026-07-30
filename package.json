@@ -1,0 +1,11 @@
+{
+	"name": "pulsely-js-build",
+	"private": true,
+	"description": "Build tooling for public/assets/js/pulsely.min.js. Not a runtime dependency of the app.",
+	"scripts": {
+		"build:js": "node scripts/build-pulsely-min.mjs"
+	},
+	"devDependencies": {
+		"esbuild": "0.24.2"
+	}
+}

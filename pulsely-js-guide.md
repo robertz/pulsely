@@ -6,12 +6,24 @@ reference, see [readme.md](readme.md) — this guide is about the client only.
 
 ## Setup
 
-Load STOMP.js first, then `pulsely.js`:
+The quickest way in — one script tag, hosted from pulsely.dev, bundles
+STOMP.js and pulsely.js together:
 
 ```html
-<script src="/assets/js/vendor/stomp.umd.min.js"></script>
-<script src="/assets/js/pulsely.js"></script>
+<script src="https://pulsely.dev/assets/js/pulsely.min.js"></script>
 ```
+
+If you'd rather load STOMP.js and pulsely.js as two separate, unminified
+files — for reading the source, debugging, or serving from your own
+domain — that setup still works and always will:
+
+```html
+<script src="https://pulsely.dev/assets/js/vendor/stomp.umd.min.js"></script>
+<script src="https://pulsely.dev/assets/js/pulsely.js"></script>
+```
+
+Either way, both `StompJs` and `Pulsely` land as globals — nothing else
+in this guide changes based on which one you pick.
 
 Create a client and connect:
 

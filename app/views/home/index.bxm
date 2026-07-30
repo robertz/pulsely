@@ -317,7 +317,7 @@ APP_SECRET = <span class="tok-str">"3b8e...ac71"</span>  <span class="tok-com">#
 				<div class="panel-copy">
 					<h3>Listen in the browser</h3>
 					<p>
-						Two script tags and four lines. The SDK opens one WebSocket and multiplexes
+						One script tag and four lines. The SDK opens one WebSocket and multiplexes
 						every channel over it, reconnecting on its own if the network drops.
 					</p>
 					<ul class="panel-list">
@@ -336,8 +336,7 @@ APP_SECRET = <span class="tok-str">"3b8e...ac71"</span>  <span class="tok-com">#
 						<span class="code-dots"><i></i><i></i><i></i></span>
 						<span class="code-title">index.html</span>
 					</div>
-<pre>&lt;<span class="tok-key">script</span> src=<span class="tok-str">"/assets/js/vendor/stomp.umd.min.js"</span>&gt;&lt;/<span class="tok-key">script</span>&gt;
-&lt;<span class="tok-key">script</span> src=<span class="tok-str">"/assets/js/pulsely.js"</span>&gt;&lt;/<span class="tok-key">script</span>&gt;
+<pre>&lt;<span class="tok-key">script</span> src=<span class="tok-str">"https://pulsely.dev/assets/js/pulsely.min.js"</span>&gt;&lt;/<span class="tok-key">script</span>&gt;
 
 &lt;<span class="tok-key">script</span>&gt;
   <span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"bp_9f2c41ad77be0c3518ea6b94"</span>);
