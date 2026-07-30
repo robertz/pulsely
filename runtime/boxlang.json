@@ -428,6 +428,80 @@
 				"useLastAccessTimeouts": false
 			}
 		},
+		// Socket/STOMP broker state, previously held in the application scope.
+		// Each cache holds one entry per logical key (destination, appId,
+		// connectionId, etc) rather than one giant struct, so eviction and
+		// locking stay scoped to the key being touched.
+		"pulselyPresence": {
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "ConcurrentStore",
+				"maxObjects": 20000,
+				"evictionPolicy": "LRU",
+				"evictCount": 100,
+				// Membership is removed explicitly on leave(), not by expiry.
+				"defaultTimeout": 0,
+				"useLastAccessTimeouts": false,
+				"resetTimeoutOnAccess": false,
+				"reapFrequency": 120
+			}
+		},
+		"pulselyWatchlist": {
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "ConcurrentStore",
+				"maxObjects": 20000,
+				"evictionPolicy": "LRU",
+				"evictCount": 100,
+				"defaultTimeout": 0,
+				"useLastAccessTimeouts": false,
+				"resetTimeoutOnAccess": false,
+				"reapFrequency": 120
+			}
+		},
+		"pulselyConnCounts": {
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "ConcurrentStore",
+				"maxObjects": 5000,
+				"evictionPolicy": "LRU",
+				"evictCount": 50,
+				"defaultTimeout": 0,
+				"useLastAccessTimeouts": false,
+				"resetTimeoutOnAccess": false,
+				"reapFrequency": 120
+			}
+		},
+		"pulselyClientEventRates": {
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "ConcurrentStore",
+				"maxObjects": 50000,
+				"evictionPolicy": "LRU",
+				"evictCount": 500,
+				// purgeExpired() drops stale budgets on a schedule; the cache
+				// itself does not time entries out.
+				"defaultTimeout": 0,
+				"useLastAccessTimeouts": false,
+				"resetTimeoutOnAccess": false,
+				"reapFrequency": 120
+			}
+		},
+		"pulselyLoginAttempts": {
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "ConcurrentStore",
+				"maxObjects": 50000,
+				"evictionPolicy": "LRU",
+				"evictCount": 500,
+				// purgeExpired() drops stale records on a schedule; the cache
+				// itself does not time entries out.
+				"defaultTimeout": 0,
+				"useLastAccessTimeouts": false,
+				"resetTimeoutOnAccess": false,
+				"reapFrequency": 120
+			}
+		},
 		// Stores all dynamic regular expressions used in the runtime
 		"bxRegex": {
 			"provider": "BoxCacheProvider",

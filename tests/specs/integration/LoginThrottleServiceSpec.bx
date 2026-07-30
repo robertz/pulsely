@@ -118,9 +118,10 @@ class extends="testbox.system.BaseSpec" {
 						variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
 
 						// Age the record beyond the counting window.
-						var store = application.pulselyLoginAttempts;
-						for ( var storeKey in store.keyArray() ) {
-							store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+						for ( var storeKey in cache( "pulselyLoginAttempts" ).getKeys() ) {
+							var record = cache( "pulselyLoginAttempts" ).get( storeKey ).getOrDefault( {} );
+							record.lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+							cache( "pulselyLoginAttempts" ).set( storeKey, record );
 						}
 
 						variables.throttle.recordFailure( "10.0.0.1", "stale@test.local" );
@@ -140,10 +141,11 @@ class extends="testbox.system.BaseSpec" {
 						}
 						expect( variables.throttle.check( "10.0.0.1", "expire@test.local" ).locked ).toBeTrue();
 
-						var store = application.pulselyLoginAttempts;
-						for ( var storeKey in store.keyArray() ) {
-							store[ storeKey ].lockedUntil = int( getTickCount() / 1000 ) - 1;
-							store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+						for ( var storeKey in cache( "pulselyLoginAttempts" ).getKeys() ) {
+							var record = cache( "pulselyLoginAttempts" ).get( storeKey ).getOrDefault( {} );
+							record.lockedUntil = int( getTickCount() / 1000 ) - 1;
+							record.lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+							cache( "pulselyLoginAttempts" ).set( storeKey, record );
 						}
 
 						expect( variables.throttle.check( "10.0.0.1", "expire@test.local" ).locked ).toBeFalse();
@@ -155,13 +157,14 @@ class extends="testbox.system.BaseSpec" {
 					() => {
 						variables.throttle.recordFailure( "10.0.0.1", "purge@test.local" );
 
-						var store = application.pulselyLoginAttempts;
-						for ( var storeKey in store.keyArray() ) {
-							store[ storeKey ].lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+						for ( var storeKey in cache( "pulselyLoginAttempts" ).getKeys() ) {
+							var record = cache( "pulselyLoginAttempts" ).get( storeKey ).getOrDefault( {} );
+							record.lastFailureAt = int( getTickCount() / 1000 ) - 100000;
+							cache( "pulselyLoginAttempts" ).set( storeKey, record );
 						}
 
 						expect( variables.throttle.purgeExpired() ).toBeGTE( 1 );
-						expect( application.pulselyLoginAttempts ).toBeEmpty();
+						expect( cache( "pulselyLoginAttempts" ).getKeys() ).toBeEmpty();
 					}
 				);
 
@@ -179,6 +182,6 @@ class extends="testbox.system.BaseSpec" {
 	}
 
 	private function reset() {
-		application.pulselyLoginAttempts = {};
+		cache( "pulselyLoginAttempts" ).clearAll();
 	}
 }

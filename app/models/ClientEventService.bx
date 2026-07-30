@@ -11,18 +11,13 @@
  * - rate limited per connection
  *
  * The per-connection budget is a sliding one-second window held in the
- * application scope, matching the single-node assumption used elsewhere.
+ * "pulselyClientEventRates" named cache, keyed per connection.
  */
 class singleton {
-	variables.STORE_KEY = "pulselyClientEventRates";
+	variables.CACHE_NAME = "pulselyClientEventRates";
 	variables.EVENT_PREFIX = "client-";
 	variables.MAX_EVENTS_PER_SECOND = 10;
 	variables.MAX_PAYLOAD_BYTES = 10240;
-
-	function init() {
-		ensureStore();
-		return this;
-	}
 
 	string function eventPrefix() {
 		return variables.EVENT_PREFIX;
@@ -50,11 +45,10 @@ class singleton {
 	 * @return true when the event may proceed.
 	 */
 	boolean function consume( required string connectionId ) {
-		var store = ensureStore();
 		var second = int( getTickCount() / 1000 );
 
 		lock name   ="pulselyClientRate-#connectionId#" type   ="exclusive" timeout="5" {
-			var record = store[ connectionId ] ?: { second: second, count: 0 };
+			var record = cache( variables.CACHE_NAME ).get( connectionId ).getOrDefault( { second: second, count: 0 } );
 
 			if ( record.second != second ) {
 				record.second = second;
@@ -62,18 +56,18 @@ class singleton {
 			}
 
 			if ( record.count >= variables.MAX_EVENTS_PER_SECOND ) {
-				store[ connectionId ] = record;
+				cache( variables.CACHE_NAME ).set( connectionId, record );
 				return false;
 			}
 
 			record.count++;
-			store[ connectionId ] = record;
+			cache( variables.CACHE_NAME ).set( connectionId, record );
 			return true;
 		}
 	}
 
 	function release( required string connectionId ) {
-		ensureStore().delete( connectionId );
+		cache( variables.CACHE_NAME ).clear( connectionId );
 	}
 
 	/**
@@ -81,13 +75,13 @@ class singleton {
 	 * grow with every socket the server has ever seen.
 	 */
 	numeric function purgeExpired() {
-		var store = ensureStore();
 		var cutoff = int( getTickCount() / 1000 ) - 60;
 		var removed = 0;
 
-		for ( var connectionId in store.keyArray() ) {
-			if ( ( store[ connectionId ].second ?: 0 ) < cutoff ) {
-				store.delete( connectionId );
+		for ( var connectionId in cache( variables.CACHE_NAME ).getKeys() ) {
+			var record = cache( variables.CACHE_NAME ).get( connectionId ).getOrDefault( {} );
+			if ( ( record.second ?: 0 ) < cutoff ) {
+				cache( variables.CACHE_NAME ).clear( connectionId );
 				removed++;
 			}
 		}
@@ -96,17 +90,6 @@ class singleton {
 	}
 
 	function clearAll() {
-		application[ variables.STORE_KEY ] = {};
-	}
-
-	private struct function ensureStore() {
-		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name   ="pulselyClientRateInit" type   ="exclusive" timeout="10" {
-				if ( !application.keyExists( variables.STORE_KEY ) ) {
-					application[ variables.STORE_KEY ] = {};
-				}
-			}
-		}
-		return application[ variables.STORE_KEY ];
+		cache( variables.CACHE_NAME ).clearAll();
 	}
 }

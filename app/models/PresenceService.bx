@@ -6,16 +6,11 @@
  * a member_added / member_removed event. Without that, opening a second tab would
  * announce a join that never happened.
  *
- * State lives in the application scope, matching the single-node assumption the
- * rest of the broker is built on.
+ * State lives in the "pulselyPresence" named cache, keyed per destination, so
+ * eviction and locking stay scoped to the channel being touched.
  */
 class singleton {
-	variables.STORE_KEY = "pulselyPresence";
-
-	function init() {
-		ensureStore();
-		return this;
-	}
+	variables.CACHE_NAME = "pulselyPresence";
 
 	/**
 	 * Record a connection as present.
@@ -29,14 +24,12 @@ class singleton {
 		required string userId,
 		struct userInfo = {}
 	) {
-		var store = ensureStore();
-
 		lock name   ="pulselyPresence-#hash( destination )#" type   ="exclusive" timeout="5" {
-			var members = store[ destination ] ?: {};
+			var members = cache( variables.CACHE_NAME ).get( destination ).getOrDefault( {} );
 			var alreadyPresent = hasUser( members, userId );
 
 			members[ connectionId ] = { "userId": userId, "userInfo": userInfo };
-			store[ destination ] = members;
+			cache( variables.CACHE_NAME ).set( destination, members );
 
 			return {
 				added : !alreadyPresent,
@@ -53,10 +46,8 @@ class singleton {
 		required string destination,
 		required string connectionId
 	) {
-		var store = ensureStore();
-
 		lock name   ="pulselyPresence-#hash( destination )#" type   ="exclusive" timeout="5" {
-			var members = store[ destination ] ?: {};
+			var members = cache( variables.CACHE_NAME ).get( destination ).getOrDefault( {} );
 
 			if ( !members.keyExists( connectionId ) ) {
 				return { removed: false, member: {} };
@@ -66,9 +57,9 @@ class singleton {
 			members.delete( connectionId );
 
 			if ( members.isEmpty() ) {
-				store.delete( destination );
+				cache( variables.CACHE_NAME ).clear( destination );
 			} else {
-				store[ destination ] = members;
+				cache( variables.CACHE_NAME ).set( destination, members );
 			}
 
 			return {
@@ -88,11 +79,11 @@ class singleton {
 	 * @return array of { destination, member, removed }
 	 */
 	array function leaveAll( required string connectionId ) {
-		var store = ensureStore();
 		var departures = [];
 
-		for ( var destination in store.keyArray() ) {
-			if ( ( store[ destination ] ?: {} ).keyExists( connectionId ) ) {
+		for ( var destination in cache( variables.CACHE_NAME ).getKeys() ) {
+			var members = cache( variables.CACHE_NAME ).get( destination ).getOrDefault( {} );
+			if ( members.keyExists( connectionId ) ) {
 				var result = leave( destination, connectionId );
 				if ( !result.member.isEmpty() ) {
 					departures.append(
@@ -113,7 +104,7 @@ class singleton {
 	 * Distinct users in the channel, in a shape the client can render directly.
 	 */
 	array function members( required string destination ) {
-		var members = ensureStore()[ destination ] ?: {};
+		var members = cache( variables.CACHE_NAME ).get( destination ).getOrDefault( {} );
 		var seen = {};
 		var list = [];
 
@@ -135,11 +126,11 @@ class singleton {
 	}
 
 	numeric function connectionCount( required string destination ) {
-		return ( ensureStore()[ destination ] ?: {} ).count();
+		return cache( variables.CACHE_NAME ).get( destination ).getOrDefault( {} ).count();
 	}
 
 	function clearAll() {
-		application[ variables.STORE_KEY ] = {};
+		cache( variables.CACHE_NAME ).clearAll();
 	}
 
 	private boolean function hasUser( required struct members, required string userId ) {
@@ -149,16 +140,5 @@ class singleton {
 			}
 		}
 		return false;
-	}
-
-	private struct function ensureStore() {
-		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name   ="pulselyPresenceInit" type   ="exclusive" timeout="10" {
-				if ( !application.keyExists( variables.STORE_KEY ) ) {
-					application[ variables.STORE_KEY ] = {};
-				}
-			}
-		}
-		return application[ variables.STORE_KEY ];
 	}
 }

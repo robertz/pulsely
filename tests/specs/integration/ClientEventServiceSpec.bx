@@ -148,11 +148,12 @@ class extends="testbox.system.BaseSpec" {
 					() => {
 						variables.clientEvents.consume( "old-conn" );
 
-						var store = application.pulselyClientEventRates;
-						store[ "old-conn" ].second = int( getTickCount() / 1000 ) - 5000;
+						var record = cache( "pulselyClientEventRates" ).get( "old-conn" ).getOrDefault( {} );
+						record.second = int( getTickCount() / 1000 ) - 5000;
+						cache( "pulselyClientEventRates" ).set( "old-conn", record );
 
 						expect( variables.clientEvents.purgeExpired() ).toBe( 1 );
-						expect( application.pulselyClientEventRates ).toBeEmpty();
+						expect( cache( "pulselyClientEventRates" ).getKeys() ).toBeEmpty();
 					}
 				);
 

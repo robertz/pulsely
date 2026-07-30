@@ -2,17 +2,13 @@
  * Usage counters for billing and the dashboard graphs.
  *
  * Message counts are written through on each trigger-API send. Connection counts
- * are kept in the application scope and flushed as a high-water mark by a
- * scheduled task, so connect/disconnect churn never touches the database.
+ * are kept in the "pulselyConnCounts" named cache and flushed as a high-water
+ * mark by a scheduled task, so connect/disconnect churn never touches the
+ * database.
  */
 class singleton {
 	variables.DSN = "pulsely";
-	variables.CONN_KEY = "pulselyConnCounts";
-
-	function init() {
-		ensureStore();
-		return this;
-	}
+	variables.CACHE_NAME = "pulselyConnCounts";
 
 	/* ------------------------------------------------------------ messages */
 
@@ -42,29 +38,29 @@ class singleton {
 	/* --------------------------------------------------------- connections */
 
 	numeric function connectionOpened( required string appId ) {
-		var store = ensureStore();
 		lock name   ="pulselyConn-#appId#" type   ="exclusive" timeout="5" {
-			store[ appId ] = ( store[ appId ] ?: { current: 0, peak: 0 } );
-			store[ appId ].current++;
-			store[ appId ].peak = max( store[ appId ].peak, store[ appId ].current );
-			return store[ appId ].current;
+			var counts = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( { current: 0, peak: 0 } );
+			counts.current++;
+			counts.peak = max( counts.peak, counts.current );
+			cache( variables.CACHE_NAME ).set( appId, counts );
+			return counts.current;
 		}
 	}
 
 	numeric function connectionClosed( required string appId ) {
-		var store = ensureStore();
 		lock name   ="pulselyConn-#appId#" type   ="exclusive" timeout="5" {
-			if ( !store.keyExists( appId ) ) {
+			if ( !cache( variables.CACHE_NAME ).lookup( appId ) ) {
 				return 0;
 			}
-			store[ appId ].current = max( 0, store[ appId ].current - 1 );
-			return store[ appId ].current;
+			var counts = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( { current: 0, peak: 0 } );
+			counts.current = max( 0, counts.current - 1 );
+			cache( variables.CACHE_NAME ).set( appId, counts );
+			return counts.current;
 		}
 	}
 
 	numeric function getCurrentConnections( required string appId ) {
-		var store = ensureStore();
-		return store.keyExists( appId ) ? store[ appId ].current : 0;
+		return cache( variables.CACHE_NAME ).get( appId ).getOrDefault( { current: 0 } ).current;
 	}
 
 	/**
@@ -73,10 +69,9 @@ class singleton {
 	 * callers (the admin monitor) merging this against a full app list.
 	 */
 	struct function snapshotConnections() {
-		var store = ensureStore();
 		var snapshot = {};
-		for ( var appId in store.keyArray() ) {
-			snapshot[ appId ] = store[ appId ].current;
+		for ( var appId in cache( variables.CACHE_NAME ).getKeys() ) {
+			snapshot[ appId ] = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( { current: 0 } ).current;
 		}
 		return snapshot;
 	}
@@ -85,10 +80,9 @@ class singleton {
 	 * Sum of live connections across every app — the monitor's header tile.
 	 */
 	numeric function getTotalConnections() {
-		var store = ensureStore();
 		var total = 0;
-		for ( var appId in store.keyArray() ) {
-			total += store[ appId ].current;
+		for ( var appId in cache( variables.CACHE_NAME ).getKeys() ) {
+			total += cache( variables.CACHE_NAME ).get( appId ).getOrDefault( { current: 0 } ).current;
 		}
 		return total;
 	}
@@ -99,13 +93,13 @@ class singleton {
 	 * re-reporting an old one.
 	 */
 	function flushPeakConnections() {
-		var store = ensureStore();
-
-		for ( var appId in store.keyArray() ) {
+		for ( var appId in cache( variables.CACHE_NAME ).getKeys() ) {
 			var peak = 0;
 			lock name   ="pulselyConn-#appId#" type   ="exclusive" timeout="5" {
-				peak = store[ appId ].peak;
-				store[ appId ].peak = store[ appId ].current;
+				var counts = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( { current: 0, peak: 0 } );
+				peak = counts.peak;
+				counts.peak = counts.current;
+				cache( variables.CACHE_NAME ).set( appId, counts );
 			}
 
 			if ( peak <= 0 ) {
@@ -127,19 +121,8 @@ class singleton {
 					{ datasource: variables.DSN }
 				);
 			} catch (any e) {
-				store.delete( appId );
+				cache( variables.CACHE_NAME ).clear( appId );
 			}
 		}
-	}
-
-	private struct function ensureStore() {
-		if ( !application.keyExists( variables.CONN_KEY ) ) {
-			lock name   ="pulselyConnStoreInit" type   ="exclusive" timeout="10" {
-				if ( !application.keyExists( variables.CONN_KEY ) ) {
-					application[ variables.CONN_KEY ] = {};
-				}
-			}
-		}
-		return application[ variables.CONN_KEY ];
 	}
 }

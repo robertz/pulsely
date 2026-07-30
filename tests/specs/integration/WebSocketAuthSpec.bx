@@ -424,7 +424,7 @@ class extends="testbox.system.BaseSpec" {
 			"authenticate()",
 			() => {
 				beforeEach( () => {
-						application.pulselyConnCounts = {};
+						cache( "pulselyConnCounts" ).clearAll();
 					} );
 
 				it(

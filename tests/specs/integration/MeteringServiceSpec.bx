@@ -261,6 +261,6 @@ class extends="testbox.system.BaseSpec" {
 			{ app: variables.TEST_APP },
 			{ datasource: variables.DSN }
 		);
-		application.pulselyConnCounts = {};
+		cache( "pulselyConnCounts" ).clearAll();
 	}
 }

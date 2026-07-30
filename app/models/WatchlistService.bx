@@ -6,16 +6,11 @@
  * tracked app-wide: a user is "online" if any of their connections have signed
  * in, regardless of what channels those connections subscribe to.
  *
- * State lives in the application scope, matching the single-node assumption the
- * rest of the broker is built on (see PresenceService, which this mirrors).
+ * State lives in the "pulselyWatchlist" named cache, keyed per app (see
+ * PresenceService, which this mirrors).
  */
 class singleton {
-	variables.STORE_KEY = "pulselyWatchlist";
-
-	function init() {
-		ensureStore();
-		return this;
-	}
+	variables.CACHE_NAME = "pulselyWatchlist";
 
 	/**
 	 * Record a connection as signed in as this user, for this app.
@@ -28,16 +23,14 @@ class singleton {
 		required string userId,
 		required string connectionId
 	) {
-		var store = ensureStore();
-
 		lock name   ="pulselyWatchlist-#appId#-#hash( userId )#" type   ="exclusive" timeout="5" {
-			var users = store[ appId ] ?: {};
+			var users = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( {} );
 			var connections = users[ userId ] ?: {};
 			var wasFirst = connections.isEmpty();
 
 			connections[ connectionId ] = true;
 			users[ userId ] = connections;
-			store[ appId ] = users;
+			cache( variables.CACHE_NAME ).set( appId, users );
 
 			return { wasFirstConnection: wasFirst };
 		}
@@ -52,10 +45,8 @@ class singleton {
 		required string userId,
 		required string connectionId
 	) {
-		var store = ensureStore();
-
 		lock name   ="pulselyWatchlist-#appId#-#hash( userId )#" type   ="exclusive" timeout="5" {
-			var users = store[ appId ] ?: {};
+			var users = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( {} );
 			var connections = users[ userId ] ?: {};
 
 			if ( !connections.keyExists( connectionId ) ) {
@@ -69,7 +60,7 @@ class singleton {
 			} else {
 				users[ userId ] = connections;
 			}
-			store[ appId ] = users;
+			cache( variables.CACHE_NAME ).set( appId, users );
 
 			return { wasLastConnection: connections.isEmpty() };
 		}
@@ -85,8 +76,7 @@ class singleton {
 		required string appId,
 		required string connectionId
 	) {
-		var store = ensureStore();
-		var users = store[ appId ] ?: {};
+		var users = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( {} );
 		var departures = [];
 
 		for ( var userId in users.keyArray() ) {
@@ -109,22 +99,11 @@ class singleton {
 	}
 
 	boolean function isOnline( required string appId, required string userId ) {
-		var users = ensureStore()[ appId ] ?: {};
+		var users = cache( variables.CACHE_NAME ).get( appId ).getOrDefault( {} );
 		return !( users[ userId ] ?: {} ).isEmpty();
 	}
 
 	function clearAll() {
-		application[ variables.STORE_KEY ] = {};
-	}
-
-	private struct function ensureStore() {
-		if ( !application.keyExists( variables.STORE_KEY ) ) {
-			lock name   ="pulselyWatchlistInit" type   ="exclusive" timeout="10" {
-				if ( !application.keyExists( variables.STORE_KEY ) ) {
-					application[ variables.STORE_KEY ] = {};
-				}
-			}
-		}
-		return application[ variables.STORE_KEY ];
+		cache( variables.CACHE_NAME ).clearAll();
 	}
 }
