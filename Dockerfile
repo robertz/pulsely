@@ -16,6 +16,14 @@ RUN rm -rf /app
 
 COPY . .
 
+# The bx-* BoxLang modules are installed by the commandbox-boxlang CommandBox
+# module, which lives in devDependencies and is therefore skipped by
+# --production. Without it CommandBox reports "Installing package
+# [forgebox:bx-mysql] √" and silently places nothing, leaving
+# boxlang_modules/ empty and the runtime with 0 activated modules. Install it
+# into CommandBox itself first so the bx-* dependencies actually land.
+RUN box install commandbox-boxlang --system
+
 # lib/ and boxlang_modules/ are gitignored and excluded by .dockerignore,
 # so they can only come from ForgeBox at build time.
 RUN box install --production
@@ -35,9 +43,24 @@ RUN sed -i 's/class : "ConsoleAppender"/class : "coldbox.system.logging.appender
 # overrides, so prod moves without changing the local binding.
 ENV BOX_SERVER_WEB_HTTP_PORT=8080
 
+# Pin the exact build. "boxlang@1.15" is not a build coordinate, so CommandBox
+# has to ask ForgeBox which build satisfies it and then download an engine the
+# image was not warmed for. On App Platform that stalled past the readiness
+# probe with no output at all. 1.15.0+52 is the exact current 1.15 build.
 ENV ENVIRONMENT=production \
     BOXLANG_DEBUG=false \
-    BOX_SERVER_APP_CFENGINE=boxlang@1.15
+    BOX_SERVER_APP_CFENGINE=boxlang@1.15.0+52
+
+# The base image ships a serverHome with boxlang@1.7.0+43 already deployed.
+# Asking for any other engine makes CommandBox refuse to redeploy over it
+# ("this server home already has [boxlang@1.7.0+43] deployed to it") and it
+# quietly keeps 1.7.0. Clear it so the warmup below deploys 1.15.0+52 cleanly.
+RUN rm -rf /usr/local/lib/serverHome
+
+# Warm the server at build time so the engine is unpacked into the image
+# rather than downloaded on every container start. Without this, App Platform
+# stalled past the readiness probe with no output while resolving the engine.
+RUN ${BUILD_DIR}/util/warmup-server.sh
 
 EXPOSE 8080
 
