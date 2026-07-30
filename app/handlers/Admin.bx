@@ -108,7 +108,7 @@ class {
 				rc.accountId ?: "",
 				rc.planId ?: ""
 			);
-		back( result, "Plan updated." );
+		backToConsole( result, "Plan updated." );
 	}
 
 	function setActive( event, rc, prc ) {
@@ -117,7 +117,7 @@ class {
 				rc.accountId ?: "",
 				!( ( rc.active ?: "0" ) == "1" )
 			);
-		back( result, "Account updated." );
+		backToConsole( result, "Account updated." );
 	}
 
 	function setAdmin( event, rc, prc ) {
@@ -126,7 +126,7 @@ class {
 				rc.accountId ?: "",
 				!( ( rc.admin ?: "0" ) == "1" )
 			);
-		back( result, "Administrator access updated." );
+		backToConsole( result, "Administrator access updated." );
 	}
 
 	/**
@@ -146,8 +146,12 @@ class {
 
 	/**
 	 * Refusals carry their reason back to the console rather than failing silently.
+	 *
+	 * Named backToConsole rather than back() because ColdBox's FrameworkSupertype
+	 * already defines a public back() (referrer-based redirect) — a same-named
+	 * private method here was losing to the inherited one at call time.
 	 */
-	private function back(
+	private function backToConsole(
 		required struct result,
 		required string successMessage
 	) {
