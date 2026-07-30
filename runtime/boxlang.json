@@ -17,7 +17,7 @@
 	// This puts the entire runtime in debug mode
 	// Which will produce lots of debug output and metrics
 	// Also the debugging error template will be used if turned on
-	"debugMode": "${BOXLANG_DEBUG:false}",
+	"debugMode": "${env.BOXLANG_DEBUG:false}",
 	// This setting if enabled will remove all the class files from the class generation directory
 	// This is useful for debugging and testing, but not recommended for production
 	"clearClassFilesOnStartup": true,
@@ -312,25 +312,25 @@
 		// runs outside the web application and still needs database access.
 		"pulsely":{
 			"connectionLimit":"100",
-			"custom":"useUnicode=true&characterEncoding=UTF8&serverTimezone=UTC&useLegacyDatetimeCode=true&autoReconnect=true&useSSL=${DB_USE_SSL:false}&requireSSL=${DB_USE_SSL:false}&allowPublicKeyRetrieval=true",
-			"database":"${DB_DATABASE:pulsely}",
+			"custom":"useUnicode=true&characterEncoding=UTF8&serverTimezone=UTC&useLegacyDatetimeCode=true&autoReconnect=true&useSSL=${env.DB_USE_SSL:false}&requireSSL=${env.DB_USE_SSL:false}&allowPublicKeyRetrieval=true",
+			"database":"${env.DB_DATABASE:pulsely}",
 			"driver":"mysql",
-			"host":"${DB_HOST:127.0.0.1}",
-			"password":"${DB_PASSWORD:}",
-			"port":"${DB_PORT:3306}",
-			"username":"${DB_USER:root}"
+			"host":"${env.DB_HOST:127.0.0.1}",
+			"password":"${env.DB_PASSWORD}",
+			"port":"${env.DB_PORT:3306}",
+			"username":"${env.DB_USER:root}"
 		},
 		"coldbox":{
 			"connectionLimit":"100",
 			"connectionTimeout":"1",
 			"custom":"useUnicode=true&characterEncoding=UTF8&serverTimezone=UTC&useLegacyDatetimeCode=true&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true",
-			"database":"${DB_DATABASE}",
-			"dbdriver":"${DB_DRIVER:MySQL}",
+			"database":"${env.DB_DATABASE}",
+			"dbdriver":"${env.DB_DRIVER:MySQL}",
 			"dsn":"jdbc:mysql://{host}:{port}/{database}",
-			"host":"${DB_HOST:127.0.0.1}",
-			"password":"${DB_PASSWORD}",
-			"port":"${DB_PORT:3306}",
-			"username":"${DB_USER:root}"
+			"host":"${env.DB_HOST:127.0.0.1}",
+			"password":"${env.DB_PASSWORD}",
+			"port":"${env.DB_PORT:3306}",
+			"username":"${env.DB_USER:root}"
 		}
 		// "testDB": {
 		// 	  "driver": "derby",

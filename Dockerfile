@@ -1,6 +1,18 @@
 FROM ortussolutions/commandbox:boxlang-ubi9
 
-WORKDIR /app
+# The base image sets APP_DIR=/app and WORKDIR /app. That collides with the
+# BoxLang mapping named "/app" in runtime/boxlang.json, whose target is
+# "${user-dir}/app" - and ${user-dir} is the working directory. When the
+# working directory is literally /app, a real on-disk /app competes with the
+# mapping of the same name and path resolution doubles a segment, so ColdBox
+# looks for /app/app/app/config/Coldbox.bx. Locally ${user-dir} is the project
+# path, so the two never collide. Relocate so the container matches local.
+ENV APP_DIR=/srv/pulsely
+WORKDIR $APP_DIR
+
+# The base image bakes a sample app into /app. Remove it so no real directory
+# shadows the "/app" mapping.
+RUN rm -rf /app
 
 COPY . .
 

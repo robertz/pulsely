@@ -39,16 +39,15 @@ services:
       - key: DB_DRIVER
         value: MySQL
       - key: DB_HOST
-        value: ${production-database.HOSTNAME}
+        value: ${amos.HOSTNAME}
       - key: DB_PORT
-        value: ${production-database.PORT}
+        value: ${amos.PORT}
       - key: DB_DATABASE
-        value: ${production-database.DATABASE}
+        value: ${amos.DATABASE}
       - key: DB_USER
-        value: ${production-database.USERNAME}
+        value: ${amos.USERNAME}
       - key: DB_PASSWORD
-        value: ${production-database.PASSWORD}
-        type: SECRET
+        value: ${amos.PASSWORD}
       - key: DB_USE_SSL
         value: "true"
       - key: JWT_SECRET
