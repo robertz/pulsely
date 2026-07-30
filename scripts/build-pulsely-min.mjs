@@ -6,10 +6,11 @@
  *
  * Plain concatenation, not an esbuild bundle: both source files are already
  * global-scope scripts (STOMP.js's UMD build assigns window.StompJs, and
- * pulsely.js's `class Pulsely` is a top-level declaration), so there is no
- * module graph to resolve. Bundling would wrap the output in an IIFE and
- * stop `Pulsely` and `StompJs` from landing on `window`, which the two-tag
- * setup in the guide - and any page already using it - depends on.
+ * pulsely.js explicitly assigns window.Pulsely itself, since a top-level
+ * `class` declaration does not do that on its own), so there is no module
+ * graph to resolve. Bundling would wrap the output in an IIFE and stop
+ * `Pulsely` and `StompJs` from landing on `window`, which the two-tag setup
+ * in the guide - and any page already using it - depends on.
  *
  * Run: node scripts/build-pulsely-min.mjs
  */

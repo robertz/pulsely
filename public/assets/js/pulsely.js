@@ -447,4 +447,9 @@ class Pulsely {
 
 if ( typeof module !== 'undefined' && module.exports ) {
 	module.exports = Pulsely;
+} else if ( typeof window !== 'undefined' ) {
+	// A top-level `class` declaration, unlike `var`, never becomes a property
+	// of `window` in a classic script — this is what the <script src> guide
+	// relies on, so it has to be assigned explicitly.
+	window.Pulsely = Pulsely;
 }
