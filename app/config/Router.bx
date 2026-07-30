@@ -15,6 +15,8 @@ class {
 		route( "/admin/account/:accountId" ).to( "Admin.account" );
 		route( "/admin/:action?" ).toHandler( "Admin" );
 
+		route( "/health" ).to( "Health.index" );
+
 		route( "/" ).to( "Home.index" );
 		route( "/pricing" ).to( "Home.index" );
 

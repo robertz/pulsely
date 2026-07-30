@@ -1,0 +1,19 @@
+/**
+ * Infrastructure liveness probe.
+ *
+ * Deliberately touches no datasource and renders no view. The App Platform
+ * readiness probe used to hit /, which routes to Home.index and queries the
+ * plans table, so a database blip failed the whole service instead of
+ * degrading it. Keep this action free of injected services.
+ */
+class {
+
+	function index( event, rc, prc ) {
+		return event.renderData(
+			type       = "json",
+			data       = { "status" : "ok" },
+			statusCode = 200
+		);
+	}
+
+}

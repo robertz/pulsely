@@ -34,17 +34,18 @@ services:
     http_port: 8080
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-2gb
-    # / routes through ColdBox to Home.index, which queries the plans table,
-    # so this probe needs the whole stack up. On a 1 vCPU instance the server
-    # took ~186s to bind and the first request compiles templates, so both the
-    # window and the per-probe timeout have to be generous. timeout_seconds
-    # defaults to 1, which the first request cannot possibly meet.
+    # /health is Health.index: no datasource, no view, ~40ms. With an
+    # unreachable database / takes 49s to fail while /health still answers in
+    # 40ms, so a database blip no longer fails the whole service.
+    # Timings measured on this instance size: 3.2s from first log line to port
+    # bind, ~8s to first served request. timeout_seconds defaults to 1, which
+    # is too tight to rely on, so it is set explicitly.
     health_check:
-      http_path: /
-      initial_delay_seconds: 240
-      period_seconds: 15
-      timeout_seconds: 15
-      failure_threshold: 15
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 5
+      failure_threshold: 6
       success_threshold: 1
     envs:
       - key: ENVIRONMENT
