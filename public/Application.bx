@@ -12,7 +12,11 @@ class{
 	 * --------------------------------------------------------------------------
 	 */
 	this.name                 = "pulsely";
-	this.sessionManagement    = true;
+	// The readiness probe hits /health every 10 seconds and never reuses a
+	// cookie, so leaving session management on there accumulates roughly 2,900
+	// idle 8-hour sessions at steady state for no benefit. This pseudo
+	// constructor is evaluated per request, so the exclusion is per request.
+	this.sessionManagement    = !reFindNoCase( "^/health(/|$)", cgi.path_info ?: "" );
 	this.sessionTimeout       = createTimespan( 0, 8, 0, 0 );
 	this.setClientCookies     = true;
 	this.setDomainCookies     = true;
