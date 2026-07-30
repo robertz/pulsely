@@ -35,6 +35,16 @@ await bp.connect();
 That's it for public channels. Private and presence channels need an
 `authToken` too — see [Private channels](#private-channels) below.
 
+With no `options.url`, the client defaults to `wss://<the page's own
+host>/ws` — the origin the page is served from, not pulsely.dev's broker.
+That default only works if you're serving your page from the same host as
+the broker. Everywhere else, pass the broker explicitly or `connect()` will
+sit in a `connecting` state against a WebSocket endpoint that doesn't exist:
+
+```js
+const bp = new Pulsely( 'your-app-key', { url: 'wss://pulsely.dev/ws' } );
+```
+
 `bp.connect()` returns a promise that resolves once the broker has accepted
 the connection, and rejects if the app key is invalid or the broker can't be
 reached at all.
