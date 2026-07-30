@@ -139,7 +139,8 @@ The dashboard does not poll — it consumes Pulsely through the same public SDK
 customers use. Each app has a reserved `$ops` destination:
 
 - `message.published` — fired by the trigger API on every publish; drives the
-  messages-today tile and the activity feed.
+  messages-today tile, the activity feed, and today's bar in the 14-day usage
+  chart (rescaling every other bar against it if today becomes the new peak).
 - `connections.changed` — fired on STOMP connect/close; drives the live
   connections tile.
 

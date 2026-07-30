@@ -120,7 +120,7 @@
 .bar {
 	width: 100%; min-height: 2px; border-radius: 4px 4px 0 0;
 	background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-	transition: filter .15s ease;
+	transition: filter .15s ease, height .3s ease;
 }
 .bar-col:hover .bar { filter: brightness(1.25); }
 .bar-label { font-size: 10px; color: var(--text-dim); margin-top: 6px; }

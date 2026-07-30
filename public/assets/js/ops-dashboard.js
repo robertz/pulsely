@@ -30,6 +30,8 @@
 	const tileMessages = document.getElementById( 'tileMessages' );
 	const tileConnections = document.getElementById( 'tileConnections' );
 	const feed = document.getElementById( 'feed' );
+	const usageChart = document.getElementById( 'usageChart' );
+	const usagePeakLabel = document.getElementById( 'usagePeakLabel' );
 
 	function setStatus( state, text ) {
 		if ( !statusEl ) return;
@@ -64,12 +66,40 @@
 		while ( feed.children.length > 30 ) feed.lastElementChild.remove();
 	}
 
+	/**
+	 * Bar heights are a percentage of the 14-day series max, so today's bar
+	 * growing past every other day's count means every bar has to be
+	 * rescaled, not just today's — otherwise today would clip past the top
+	 * of the chart instead of the rest settling down under it.
+	 */
+	function updateUsageChart( messagesToday ) {
+		if ( !usageChart ) return;
+		const todayBar = document.getElementById( 'barToday' );
+		if ( !todayBar ) return;
+
+		todayBar.querySelector( '.bar' ).dataset.messages = messagesToday;
+		todayBar.title = todayBar.title.replace( /: [\d,]+ messages$/, `: ${messagesToday.toLocaleString()} messages` );
+
+		const bars = Array.from( usageChart.querySelectorAll( '.bar' ) );
+		const max = Math.max( 1, ...bars.map( ( bar ) => Number( bar.dataset.messages || 0 ) ) );
+
+		bars.forEach( ( bar ) => {
+			const count = Number( bar.dataset.messages || 0 );
+			bar.style.height = `${Math.max( 2, Math.round( count / max * 100 ) )}%`;
+		} );
+
+		usageChart.dataset.max = max;
+		if ( usagePeakLabel ) usagePeakLabel.textContent = `Peak ${max.toLocaleString()} messages in a day.`;
+		flash( todayBar.querySelector( '.bar' ) );
+	}
+
 	const bp = new Pulsely( appKey, { authToken: opsToken } );
 
 	bp.bind( 'message.published', ( data ) => {
 		if ( typeof data.messagesToday === 'number' ) {
 			tileMessages.textContent = data.messagesToday.toLocaleString();
 			flash( tileMessages );
+			updateUsageChart( data.messagesToday );
 		}
 		addFeedItem( {
 			time: data.at || new Date().toLocaleTimeString(),

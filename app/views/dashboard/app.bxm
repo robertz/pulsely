@@ -69,15 +69,18 @@
 	<bx:loop array="#prc.usageSeries#" index="point">
 		<bx:set maxMessages = max( maxMessages, point.messages )>
 	</bx:loop>
-	<div class="chart">
+	<bx:set today = dateFormat( now(), "yyyy-mm-dd" )>
+	<div class="chart" id="usageChart" data-max="#maxMessages#">
 		<bx:loop array="#prc.usageSeries#" index="point">
-			<div class="bar-col" title="#encodeForHTMLAttribute( point.date )#: #numberFormat( point.messages )# messages">
-				<div class="bar" style="height: #max( 2, int( point.messages / maxMessages * 100 ) )#%"></div>
+			<div class="bar-col" data-date="#point.date#"<bx:if point.date EQ today> id="barToday"</bx:if>
+				title="#encodeForHTMLAttribute( point.date )#: #numberFormat( point.messages )# messages">
+				<div class="bar" data-messages="#point.messages#"
+					style="height: #max( 2, int( point.messages / maxMessages * 100 ) )#%"></div>
 				<span class="bar-label">#right( point.date, 2 )#</span>
 			</div>
 		</bx:loop>
 	</div>
-	<p class="muted small">Peak #numberFormat( maxMessages )# messages in a day.</p>
+	<p class="muted small" id="usagePeakLabel">Peak #numberFormat( maxMessages )# messages in a day.</p>
 </section>
 
 <section class="card">
