@@ -23,6 +23,27 @@ class{
 	this.timezone             = "UTC";
 	this.whiteSpaceManagement = "smart";
 
+	this.caches = {
+		"pulselyCache": {
+			"enabled": true,
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "JDBCStore",
+				"datasource": "pulsely",
+				"table": "pulselyCache",
+				"autoCreate": true,
+				"maxObjects": 10000,
+				"evictionPolicy": "LRU",
+				"evictCount": 500,
+				"defaultTimeout": 3600,
+				"defaultLastAccessTimeout": 1800,
+				"reapFrequency": 300
+			}
+		}
+	}
+
+	this.sessionStorage = "pulselyCache";
+
 	/**
 	 * --------------------------------------------------------------------------
 	 * Location Mappings
