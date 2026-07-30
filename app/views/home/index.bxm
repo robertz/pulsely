@@ -68,7 +68,7 @@
 					<span class="code-title">your frontend</span>
 				</div>
 <pre><span class="tok-com">// Subscribe. Your app key is public and safe to ship.</span>
-<span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"bp_your_app_key"</span>);
+<span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"pl_your_app_key"</span>);
 
 <span class="tok-fn">await</span> bp.<span class="tok-fn">connect</span>();
 
@@ -307,7 +307,7 @@ bp.<span class="tok-fn">bind</span>(<span class="tok-str">"created"</span>, (ord
 					</div>
 <pre><span class="tok-com">## From the dashboard, per app</span>
 APP_ID     = <span class="tok-str">"a3f19c42e8b7415d9c02e77a1b5d6e30"</span>
-APP_KEY    = <span class="tok-str">"bp_9f2c41ad77be0c3518ea6b94"</span>
+APP_KEY    = <span class="tok-str">"pl_9f2c41ad77be0c3518ea6b94"</span>
 APP_SECRET = <span class="tok-str">"3b8e...ac71"</span>  <span class="tok-com">## keep on the server</span></pre>
 				</div>
 			</div>
@@ -339,7 +339,7 @@ APP_SECRET = <span class="tok-str">"3b8e...ac71"</span>  <span class="tok-com">#
 <pre>&lt;<span class="tok-key">script</span> src=<span class="tok-str">"https://pulsely.dev/assets/js/pulsely.min.js"</span>&gt;&lt;/<span class="tok-key">script</span>&gt;
 
 &lt;<span class="tok-key">script</span>&gt;
-  <span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"bp_9f2c41ad77be0c3518ea6b94"</span>);
+  <span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>(<span class="tok-str">"pl_9f2c41ad77be0c3518ea6b94"</span>);
 
   <span class="tok-fn">await</span> bp.<span class="tok-fn">connect</span>();
 

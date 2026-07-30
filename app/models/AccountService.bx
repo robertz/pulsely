@@ -239,7 +239,7 @@ class singleton {
 				accountId: { value: accountId, type: "varchar" },
 				name     : { value: trim( name ), type: "varchar" },
 				appKey   : {
-					value: "bp_" & lcase( replace(
+					value: "pl_" & lcase( replace(
 							createUUID(),
 							"-",
 							"",

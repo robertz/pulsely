@@ -616,7 +616,7 @@ class extends="coldbox.system.testing.BaseTestCase" {
 						var created = variables.accounts.getApp( variables.DEV_ACCOUNT, appId );
 						expect( created ).notToBeEmpty();
 						expect( created.name ).toBe( "Spec Created App" );
-						expect( created.app_key ).toMatch( "^bp_[0-9a-f]{24}$" );
+						expect( created.app_key ).toMatch( "^pl_[0-9a-f]{24}$" );
 						expect( len( created.app_secret ) ).toBe( 64 );
 
 						queryExecute(
