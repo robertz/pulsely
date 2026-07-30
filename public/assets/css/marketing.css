@@ -520,3 +520,103 @@
 	font-size: 13.5px;
 	margin-bottom: 4px;
 }
+
+/* -------------------------------------------------------------------- docs */
+
+.docs-hero { padding: 56px 0 8px; }
+.docs-hero h1 { font-size: clamp(2rem, 4vw, 2.7rem); max-width: 22ch; margin-bottom: 14px; }
+.docs-hero p { color: var(--text-muted); font-size: 1.05rem; max-width: 62ch; margin: 0; }
+
+.docs-shell {
+	display: grid;
+	grid-template-columns: 220px minmax(0, 1fr);
+	gap: 48px;
+	align-items: start;
+	padding: 40px 0 100px;
+}
+
+@media (max-width: 900px) {
+	.docs-shell { grid-template-columns: 1fr; }
+}
+
+.docs-toc {
+	position: sticky;
+	top: 82px;
+	display: grid;
+	gap: 2px;
+	max-height: calc(100vh - 100px);
+	overflow-y: auto;
+}
+
+.docs-toc-group { margin: 18px 0 4px; padding: 0 12px; font-size: 11px; font-weight: 640; letter-spacing: .05em; text-transform: uppercase; color: var(--text-dim); }
+.docs-toc-group:first-child { margin-top: 0; }
+
+.docs-toc a {
+	padding: 6px 12px;
+	border-radius: var(--radius-sm);
+	font-size: 14px;
+	color: var(--text-muted);
+	transition: color .16s ease, background .16s ease;
+}
+.docs-toc a:hover { color: var(--text); background: var(--surface); }
+
+@media (max-width: 900px) {
+	.docs-toc { position: static; max-height: none; display: flex; flex-wrap: wrap; gap: 6px; }
+	.docs-toc-group { display: none; }
+	.docs-toc a { border: 1px solid var(--border); }
+}
+
+.docs-content { min-width: 0; max-width: 74ch; }
+
+.docs-section { padding-top: 46px; margin-top: 46px; border-top: 1px solid var(--border-soft); scroll-margin-top: 82px; }
+.docs-section:first-child { padding-top: 0; margin-top: 0; border-top: none; }
+
+.docs-section h2 { font-size: 1.55rem; margin-bottom: 14px; }
+.docs-section h3 { font-size: 1.15rem; margin: 30px 0 10px; }
+.docs-section > p, .docs-section li { color: var(--text-muted); font-size: 15px; line-height: 1.75; }
+.docs-section > p { margin: 0 0 16px; }
+.docs-section code { background: var(--bg-raised); padding: 1px 6px; border-radius: 4px; font-size: 12.8px; color: var(--accent); }
+.docs-section pre code { background: none; padding: 0; color: inherit; }
+
+.docs-section ul, .docs-section ol { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 6px; }
+
+.docs-note {
+	margin: 0 0 20px;
+	padding: 13px 15px;
+	border-left: 2px solid rgba(52, 229, 139, .45);
+	background: rgba(52, 229, 139, .05);
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	color: var(--text-muted);
+	font-size: 13.5px;
+}
+.docs-note strong { color: var(--text); }
+
+.docs-warn {
+	margin: 0 0 20px;
+	padding: 13px 15px;
+	border-left: 2px solid rgba(255, 107, 107, .5);
+	background: rgba(255, 107, 107, .06);
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	color: var(--text-muted);
+	font-size: 13.5px;
+}
+.docs-warn strong { color: var(--text); }
+
+.docs-table-wrap { overflow-x: auto; margin: 0 0 24px; }
+.docs-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.docs-table th, .docs-table td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border-soft); }
+.docs-table th { color: var(--text-dim); font-weight: 560; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+.docs-table td { color: var(--text-muted); }
+.docs-table td:first-child, .docs-table td code { color: var(--text); }
+.docs-table tr:last-child td { border-bottom: none; }
+
+/* A single code-card behind a language tablist, as opposed to .panel's
+   two-column copy+code layout — used for every multi-language example. */
+.docs-lang-panel[hidden] { display: none; }
+.docs-lang-panel .code-card { min-width: 0; }
+.docs-lang-panel .code-card pre { font-size: 12.8px; }
+
+.no-js .docs-lang-panel[hidden] { display: block; }
+.no-js [data-tabgroup] .tablist { display: none; }
+.no-js [data-tabgroup] .docs-lang-panel { margin-bottom: 14px; }
+.no-js [data-tabgroup] .docs-lang-panel .code-title::after { content: " — shown without JS tabs"; }

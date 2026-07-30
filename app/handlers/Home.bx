@@ -9,4 +9,9 @@ class {
 		prc.plans = planService.getPublicPlans();
 		event.setView( view = "home/index", layout = "Marketing" );
 	}
+
+	function docs( event, rc, prc ) {
+		prc.account = session.account ?: {};
+		event.setView( view = "home/docs", layout = "Marketing" );
+	}
 }

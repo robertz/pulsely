@@ -19,6 +19,7 @@
 			<a class="nav-link" href="/#features">Features</a>
 			<a class="nav-link" href="/#how">How it works</a>
 			<a class="nav-link" href="/#pricing">Pricing</a>
+			<a class="nav-link" href="/docs">Documentation</a>
 
 			<div class="header-cta">
 				<bx:output>
@@ -44,6 +45,7 @@
 		<div class="footer-links">
 			<a href="/#features">Features</a>
 			<a href="/#pricing">Pricing</a>
+			<a href="/docs">Documentation</a>
 			<a href="/dashboard/login">Sign in</a>
 			<a href="/dashboard/signup">Start free</a>
 		</div>

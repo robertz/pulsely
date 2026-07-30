@@ -19,6 +19,7 @@ class {
 
 		route( "/" ).to( "Home.index" );
 		route( "/pricing" ).to( "Home.index" );
+		route( "/docs" ).to( "Home.docs" );
 
 		route( ":handler/:action?" ).end();
 	}

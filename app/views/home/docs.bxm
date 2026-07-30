@@ -1,0 +1,780 @@
+<section class="docs-hero">
+	<div class="wrap">
+		<h1>Documentation</h1>
+		<p>
+			Everything you need to add realtime channels to your app: connect from the
+			browser, publish from your backend, lock channels down, and react to what
+			happens on them. Examples are shown in every language Pulsely ships a
+			server SDK for — pick the tab that matches your stack.
+		</p>
+	</div>
+</section>
+
+<div class="wrap docs-shell">
+
+	<nav class="docs-toc" aria-label="Documentation contents">
+		<div class="docs-toc-group">Start here</div>
+		<a href="#getting-started">Getting started</a>
+
+		<div class="docs-toc-group">Browser SDK</div>
+		<a href="#connecting">Connecting &amp; subscribing</a>
+		<a href="#private-presence">Private &amp; presence channels</a>
+		<a href="#client-events">Client-published events</a>
+		<a href="#connection-state">Watching the connection</a>
+
+		<div class="docs-toc-group">Server SDKs</div>
+		<a href="#trigger-api">Publishing events</a>
+		<a href="#channels-api">Listing channels</a>
+		<a href="#webhooks">Event webhooks</a>
+
+		<div class="docs-toc-group">Reference</div>
+		<a href="#browser-reference">Browser SDK reference</a>
+		<a href="#server-reference">Server SDK reference</a>
+		<a href="#admin">Administration</a>
+	</nav>
+
+	<div class="docs-content">
+
+		<!-- ============================================================ getting started -->
+		<section class="docs-section" id="getting-started">
+			<h2>Getting started</h2>
+			<p>
+				An app is an isolated pub/sub namespace. <a href="/dashboard/signup">Create one</a>
+				and three credentials appear immediately — there is no provisioning step and
+				nothing to wait on.
+			</p>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Credential</th><th>Visibility</th><th>Used for</th></tr></thead>
+					<tbody>
+						<tr><td><code>App ID</code></td><td>Public</td><td>Identifies the app in every server API URL</td></tr>
+						<tr><td><code>App key</code></td><td>Public — ship it in your frontend bundle</td><td>The browser SDK's connection identity</td></tr>
+						<tr><td><code>App secret</code></td><td>Server-side only</td><td>Signs every server-side request. Must never reach a browser.</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="docs-note">
+				Channels are created implicitly. There is nothing to register — publish to
+				<code>orders</code> and the channel exists. It disappears again once the last
+				subscriber leaves.
+			</div>
+
+			<p>
+				From here: subscribe in the browser (<a href="#connecting">next section</a>), then
+				publish from your backend with the <a href="#trigger-api">trigger API</a>. Both
+				sides use the same app.
+			</p>
+		</section>
+
+		<!-- ============================================================ connecting -->
+		<section class="docs-section" id="connecting">
+			<h2>Connecting &amp; subscribing</h2>
+			<p>One script tag, hosted from Pulsely, bundles the SDK and its STOMP.js dependency together:</p>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">index.html</span></div>
+<pre>&lt;<span class="tok-fn">script</span> <span class="tok-key">src</span>=<span class="tok-str">"https://pulsely.dev/assets/js/pulsely.min.js"</span>&gt;&lt;/<span class="tok-fn">script</span>&gt;</pre>
+			</div>
+
+			<p>
+				If you'd rather load STOMP.js and pulsely.js as two separate, unminified files
+				— for reading the source, debugging, or serving from your own domain — that
+				works too and always will. Either way, both <code>StompJs</code> and
+				<code>Pulsely</code> land as globals.
+			</p>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">app.js</span></div>
+<pre><span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>( <span class="tok-str">'your-app-key'</span> ); <span class="tok-com">// safe in the browser</span>
+<span class="tok-key">await</span> bp.<span class="tok-fn">connect</span>();
+
+bp.<span class="tok-fn">subscribe</span>( <span class="tok-str">'orders'</span> );
+bp.<span class="tok-fn">bind</span>( <span class="tok-str">'created'</span>, ( data, meta ) =&gt; {
+  <span class="tok-fn">console</span>.log( <span class="tok-str">'new order:'</span>, data, meta.replayed );
+} );</pre>
+			</div>
+
+			<p>
+				<code>subscribe()</code> can be called before or after <code>connect()</code>
+				resolves — it queues either way. <code>bind(eventName, callback)</code> only
+				fires for that exact event name; your callback receives
+				<code>(data, meta)</code>, where <code>meta</code> is
+				<code>{ channel, event, replayed, fromClient }</code>. If the channel's plan has
+				message history on, subscribing replays recent messages (oldest → newest,
+				<code>meta.replayed === true</code>) before the live stream starts, so a page
+				that just loaded doesn't render empty.
+			</p>
+
+			<p>
+				To listen for everything without knowing event names ahead of time — a debug
+				console, an activity log — use <code>bindGlobal((data, meta) => …)</code>
+				instead; it fires alongside any <code>bind()</code> handlers, not in place of
+				them.
+			</p>
+
+			<div class="docs-warn">
+				<strong>Default broker URL.</strong> With no <code>options.url</code>, the
+				client defaults to <code>wss://&lt;the page's own host&gt;/ws</code> — the
+				origin the page is served from, <em>not</em> Pulsely's broker. Pass it
+				explicitly everywhere else, or <code>connect()</code> sits in a
+				<code>connecting</code> state against a WebSocket endpoint that doesn't exist:
+				<code>new Pulsely('your-app-key', { url: 'wss://pulsely.dev/ws' })</code>.
+			</div>
+		</section>
+
+		<!-- ============================================================ private/presence -->
+		<section class="docs-section" id="private-presence">
+			<h2>Private &amp; presence channels</h2>
+			<p>
+				Channels prefixed <code>private-</code> or <code>presence-</code> require your
+				server to vouch for the connection. Two pieces: your backend mints a
+				short-lived connection token, and your backend answers an authorization
+				webhook when a subscribe comes in.
+			</p>
+
+			<h3>1. Mint a connection token</h3>
+			<p>Every server SDK has the same <code>authToken(userId, ttlSeconds)</code> method:</p>
+
+			<div class="lang-tabs" data-tabgroup>
+				<div class="tablist" role="tablist" aria-label="Mint a connection token, by language">
+					<button class="tab" role="tab" id="tab-token-node" aria-controls="panel-token-node" aria-selected="true">Node.js</button>
+					<button class="tab" role="tab" id="tab-token-python" aria-controls="panel-token-python" aria-selected="false">Python</button>
+					<button class="tab" role="tab" id="tab-token-boxlang" aria-controls="panel-token-boxlang" aria-selected="false">BoxLang</button>
+					<button class="tab" role="tab" id="tab-token-php" aria-controls="panel-token-php" aria-selected="false">PHP</button>
+				</div>
+
+				<div class="docs-lang-panel" role="tabpanel" id="panel-token-node" aria-labelledby="tab-token-node">
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.js</span></div>
+<pre><span class="tok-key">const</span> token = bp.<span class="tok-fn">authToken</span>( user.id ); <span class="tok-com">// "{expires}.{userId}.{hmac}"</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-token-python" aria-labelledby="tab-token-python" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.py</span></div>
+<pre>token = bp.<span class="tok-fn">auth_token</span>(user.id)</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-token-boxlang" aria-labelledby="tab-token-boxlang" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.bx</span></div>
+<pre>token = pulsely.<span class="tok-fn">authToken</span>( user.id )</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-token-php" aria-labelledby="tab-token-php" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.php</span></div>
+<pre>$token = $bp-&gt;<span class="tok-fn">authToken</span>($user-&gt;id);</pre>
+					</div>
+				</div>
+			</div>
+
+			<h3>2. Present it from the browser</h3>
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">app.js</span></div>
+<pre><span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>( <span class="tok-str">'your-app-key'</span>, { authToken: token } );
+<span class="tok-key">await</span> bp.<span class="tok-fn">connect</span>();
+bp.<span class="tok-fn">subscribe</span>( <span class="tok-str">'private-orders'</span> );</pre>
+			</div>
+
+			<h3>3. Answer the auth webhook</h3>
+			<p>
+				Pulsely POSTs <code>{ channel_name, socket_id, user_token }</code> to the
+				endpoint registered on your channel rule, and honors
+				<code>{"authorized": true|false}</code> back. Any timeout, non-200, or
+				malformed response denies. <code>authorizeChannel(…)</code> builds the
+				response shape for you:
+			</p>
+
+			<div class="lang-tabs" data-tabgroup>
+				<div class="tablist" role="tablist" aria-label="Auth endpoint response, by language">
+					<button class="tab" role="tab" id="tab-authep-node" aria-controls="panel-authep-node" aria-selected="true">Node.js</button>
+					<button class="tab" role="tab" id="tab-authep-python" aria-controls="panel-authep-python" aria-selected="false">Python</button>
+					<button class="tab" role="tab" id="tab-authep-boxlang" aria-controls="panel-authep-boxlang" aria-selected="false">BoxLang</button>
+					<button class="tab" role="tab" id="tab-authep-php" aria-controls="panel-authep-php" aria-selected="false">PHP</button>
+				</div>
+
+				<div class="docs-lang-panel" role="tabpanel" id="panel-authep-node" aria-labelledby="tab-authep-node">
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.js</span></div>
+<pre>app.<span class="tok-fn">post</span>( <span class="tok-str">'/pulsely/auth'</span>, ( req, res ) =&gt; {
+  <span class="tok-key">const</span> user = <span class="tok-fn">userFromToken</span>( req.body.user_token );
+  res.<span class="tok-fn">json</span>( bp.<span class="tok-fn">authorizeChannel</span>( {
+    authorized: <span class="tok-fn">canSee</span>( user, req.body.channel_name ),
+    userId: user.id,
+    userInfo: { name: user.name }
+  } ) );
+} );</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-authep-python" aria-labelledby="tab-authep-python" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.py</span></div>
+<pre><span class="tok-key">@app</span>.route(<span class="tok-str">"/pulsely/auth"</span>, methods=[<span class="tok-str">"POST"</span>])
+<span class="tok-key">def</span> <span class="tok-fn">pulsely_auth</span>():
+    user = user_from_token(request.json[<span class="tok-str">"user_token"</span>])
+    <span class="tok-key">return</span> bp.authorize_channel(
+        authorized=can_see(user, request.json[<span class="tok-str">"channel_name"</span>]),
+        user_id=user.id,
+        user_info={<span class="tok-str">"name"</span>: user.name},
+    )</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-authep-boxlang" aria-labelledby="tab-authep-boxlang" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">handlers/PulselyAuth.bx</span></div>
+<pre>function <span class="tok-fn">answer</span>( event, rc, prc ) {
+  user = <span class="tok-fn">userFromToken</span>( rc.user_token );
+  return pulsely.<span class="tok-fn">authorizeChannel</span>(
+    authorized = <span class="tok-fn">canSee</span>( user, rc.channel_name ),
+    userId     = user.id,
+    userInfo   = { "name" : user.name }
+  );
+}</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-authep-php" aria-labelledby="tab-authep-php" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">pulsely-auth.php</span></div>
+<pre>$input = json_decode(file_get_contents(<span class="tok-str">'php://input'</span>), true);
+$user = userFromToken($input[<span class="tok-str">'user_token'</span>]);
+
+echo json_encode($bp-&gt;authorizeChannel(
+    canSee($user, $input[<span class="tok-str">'channel_name'</span>]),
+    $user-&gt;id,
+    [<span class="tok-str">'name'</span> =&gt; $user-&gt;name]
+));</pre>
+					</div>
+				</div>
+			</div>
+
+			<h3>Presence channels</h3>
+			<p>
+				Subscribing to a <code>presence-</code> channel joins a live roster. The auth
+				endpoint names the subscriber by returning <code>user_id</code> and optional
+				<code>user_info</code> alongside <code>authorized</code>; membership is tracked
+				per connection but <strong>reported per user</strong> — someone with three tabs
+				open is one member, and only their first arrival and last departure produce an
+				event.
+			</p>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">app.js</span></div>
+<pre>bp.<span class="tok-fn">subscribe</span>( <span class="tok-str">'presence-lobby'</span> );
+
+bp.<span class="tok-fn">bind</span>( <span class="tok-str">'presence.subscription_succeeded'</span>, () =&gt; <span class="tok-fn">renderMembers</span>( bp.<span class="tok-fn">members</span>( <span class="tok-str">'presence-lobby'</span> ) ) );
+bp.<span class="tok-fn">bind</span>( <span class="tok-str">'presence.member_added'</span>,   ( d ) =&gt; <span class="tok-fn">addMember</span>( d.member ) );
+bp.<span class="tok-fn">bind</span>( <span class="tok-str">'presence.member_removed'</span>, ( d ) =&gt; <span class="tok-fn">removeMember</span>( d.member ) );
+
+bp.<span class="tok-fn">members</span>( <span class="tok-str">'presence-lobby'</span> );      <span class="tok-com">// [{ user_id, user_info }, …]</span>
+bp.<span class="tok-fn">memberCount</span>( <span class="tok-str">'presence-lobby'</span> );  <span class="tok-com">// distinct users</span></pre>
+			</div>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Event</th><th>Sent to</th><th>Payload</th></tr></thead>
+					<tbody>
+						<tr><td><code>presence.subscription_succeeded</code></td><td>the joiner only</td><td><code>{ members, me, count }</code></td></tr>
+						<tr><td><code>presence.member_added</code></td><td>everyone else</td><td><code>{ member, count }</code></td></tr>
+						<tr><td><code>presence.member_removed</code></td><td>everyone else</td><td><code>{ member, count }</code></td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<p>Presence requires a plan with <code>allows_presence_channels</code> and a matching rule in <code>channel_auth_rules</code>, the same as private channels.</p>
+		</section>
+
+		<!-- ============================================================ client events -->
+		<section class="docs-section" id="client-events">
+			<h2>Client-published events</h2>
+			<p>
+				By default only your server publishes, via the signed trigger API. Client
+				events let browsers publish straight to each other — typing indicators,
+				cursor positions, reactions — anywhere a round trip through your backend is
+				wasted work. Because the app key is public, this is deliberately narrow:
+			</p>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Guard</th><th>Why</th></tr></thead>
+					<tbody>
+						<tr><td>Off unless the app opts in</td><td>The default cannot be "any visitor may broadcast"</td></tr>
+						<tr><td><code>private-</code> / <code>presence-</code> channels only</td><td>Public channels would let any visitor reach every other one</td></tr>
+						<tr><td>Must already be subscribed</td><td>Subscribing means your auth endpoint approved them</td></tr>
+						<tr><td>Event name starts with <code>client-</code></td><td>A client can never impersonate a server event your handlers trust</td></tr>
+						<tr><td>10 events/second per connection</td><td>One abusive tab cannot flood a channel</td></tr>
+						<tr><td>10 KB per payload</td><td>&mdash;</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">app.js</span></div>
+<pre>bp.<span class="tok-fn">subscribe</span>( <span class="tok-str">'private-chat-42'</span> );
+bp.<span class="tok-fn">trigger</span>( <span class="tok-str">'private-chat-42'</span>, <span class="tok-str">'client-typing'</span>, { user: <span class="tok-str">'ada'</span> } );
+
+bp.<span class="tok-fn">bind</span>( <span class="tok-str">'client-typing'</span>, ( data, meta ) =&gt; {
+  <span class="tok-com">// meta.fromClient === true — this came from a browser, not your server.</span>
+  <span class="tok-fn">showTypingIndicator</span>( data.user );
+} );</pre>
+			</div>
+
+			<p>
+				Client events are metered like any other message but are <strong>not written
+				to history</strong> — they're ephemeral, and persisting them would let any
+				connected browser write rows into your history table indefinitely. Senders
+				never receive their own events back, and <code>meta.fromClient</code> tells
+				your handler which messages came from a browser rather than your server —
+				validate those. Toggle client events per app from the app page in the
+				dashboard.
+			</p>
+		</section>
+
+		<!-- ============================================================ connection state -->
+		<section class="docs-section" id="connection-state">
+			<h2>Watching the connection</h2>
+			<p>
+				Don't reach into <code>bp.client</code> — that's the underlying STOMP.js client,
+				and touching it directly breaks the SDK's own bookkeeping (its callback
+				properties hold one handler each, so setting your own silently replaces the
+				SDK's). Use <code>bp.connection.bind(…)</code> instead:
+			</p>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">app.js</span></div>
+<pre>bp.connection.<span class="tok-fn">bind</span>( <span class="tok-str">'state_change'</span>, ( { previous, current, error } ) =&gt; {
+  <span class="tok-key">if</span> ( current === <span class="tok-str">'connected'</span> )    <span class="tok-fn">showBanner</span>( <span class="tok-str">'Live'</span> );
+  <span class="tok-key">if</span> ( current === <span class="tok-str">'unavailable'</span> )  <span class="tok-fn">showBanner</span>( error || <span class="tok-str">'Reconnecting…'</span> );
+  <span class="tok-key">if</span> ( current === <span class="tok-str">'disconnected'</span> ) <span class="tok-fn">showBanner</span>( <span class="tok-str">'Disconnected'</span> );
+} );</pre>
+			</div>
+
+			<p>
+				States: <code>initialized</code> → <code>connecting</code> →
+				<code>connected</code> / <code>unavailable</code> (dropped or refused — the
+				SDK retries automatically) / <code>disconnected</code> (you called
+				<code>disconnect()</code> — terminal, no retry). Call
+				<code>bp.disconnect()</code> on page unload for prompt server-side cleanup
+				rather than waiting for the broker to notice the socket died.
+			</p>
+		</section>
+
+		<!-- ============================================================ trigger api -->
+		<section class="docs-section" id="trigger-api">
+			<h2>Publishing events (trigger API)</h2>
+			<p>
+				Your backend publishes with one signed HTTP call — no socket to hold open,
+				no client library to keep alive:
+			</p>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">wire format</span></div>
+<pre>POST /apps/{appId}/events
+X-Pulsely-Timestamp: {epochSeconds}
+X-Pulsely-Signature: {hex}
+{"channel":"orders","event":"created","data":{...}}</pre>
+			</div>
+
+			<p>
+				Signed HMAC-SHA256 with your app secret, over four lines joined by real
+				newlines: <code>POST\n/apps/{appId}/events\n{timestamp}\n{sha256(body)}</code>.
+				The path and body hash are bound into the signature so a captured one can't be
+				replayed against another app or payload; timestamps outside the auth window
+				(600 seconds by default) are rejected. Every server SDK gets this right for
+				you:
+			</p>
+
+			<div class="lang-tabs" data-tabgroup>
+				<div class="tablist" role="tablist" aria-label="Publish an event, by language">
+					<button class="tab" role="tab" id="tab-trigger-curl" aria-controls="panel-trigger-curl" aria-selected="true">cURL</button>
+					<button class="tab" role="tab" id="tab-trigger-node" aria-controls="panel-trigger-node" aria-selected="false">Node.js</button>
+					<button class="tab" role="tab" id="tab-trigger-python" aria-controls="panel-trigger-python" aria-selected="false">Python</button>
+					<button class="tab" role="tab" id="tab-trigger-boxlang" aria-controls="panel-trigger-boxlang" aria-selected="false">BoxLang</button>
+					<button class="tab" role="tab" id="tab-trigger-php" aria-controls="panel-trigger-php" aria-selected="false">PHP</button>
+				</div>
+
+				<div class="docs-lang-panel" role="tabpanel" id="panel-trigger-curl" aria-labelledby="tab-trigger-curl">
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">publish.sh</span></div>
+<pre><span class="tok-fn">BODY</span>=<span class="tok-str">'{"channel":"orders","event":"created","data":{"id":42}}'</span>
+<span class="tok-fn">TS</span>=$(date +%s)
+<span class="tok-fn">BODY_HASH</span>=$(printf <span class="tok-str">'%s'</span> <span class="tok-str">"$BODY"</span> | shasum -a 256 | cut -d<span class="tok-str">' '</span> -f1)
+<span class="tok-fn">SIGNING</span>=$(printf <span class="tok-str">'POST\n/apps/%s/events\n%s\n%s'</span> <span class="tok-str">"$APP_ID"</span> <span class="tok-str">"$TS"</span> <span class="tok-str">"$BODY_HASH"</span>)
+<span class="tok-fn">SIG</span>=$(printf <span class="tok-str">'%s'</span> <span class="tok-str">"$SIGNING"</span> | openssl dgst -sha256 -hmac <span class="tok-str">"$APP_SECRET"</span> | sed <span class="tok-str">'s/^.*= //'</span>)
+
+curl -X POST <span class="tok-str">"https://pulsely.dev/apps/$APP_ID/events"</span> \
+  -H <span class="tok-str">"Content-Type: application/json"</span> \
+  -H <span class="tok-str">"X-Pulsely-Timestamp: $TS"</span> \
+  -H <span class="tok-str">"X-Pulsely-Signature: $SIG"</span> \
+  --data-binary <span class="tok-str">"$BODY"</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-trigger-node" aria-labelledby="tab-trigger-node" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.js</span></div>
+<pre><span class="tok-key">const</span> bp = <span class="tok-key">new</span> <span class="tok-fn">Pulsely</span>( { appId, appKey, appSecret, baseUrl } );
+<span class="tok-key">await</span> bp.<span class="tok-fn">trigger</span>( <span class="tok-str">'orders'</span>, <span class="tok-str">'created'</span>, { id: 42 } );</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-trigger-python" aria-labelledby="tab-trigger-python" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.py</span></div>
+<pre>bp = Pulsely(app_id=app_id, app_key=app_key, app_secret=app_secret, base_url=base_url)
+bp.trigger(<span class="tok-str">"orders"</span>, <span class="tok-str">"created"</span>, {<span class="tok-str">"id"</span>: 42})</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-trigger-boxlang" aria-labelledby="tab-trigger-boxlang" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.bx</span></div>
+<pre>pulsely = <span class="tok-key">new</span> Pulsely( appId = <span class="tok-str">"…"</span>, appKey = <span class="tok-str">"…"</span>, appSecret = <span class="tok-str">"…"</span> );
+pulsely.<span class="tok-fn">trigger</span>( <span class="tok-str">"orders"</span>, <span class="tok-str">"created"</span>, { <span class="tok-str">"id"</span> : 42 } );</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-trigger-php" aria-labelledby="tab-trigger-php" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.php</span></div>
+<pre>$bp = <span class="tok-key">new</span> Pulsely([<span class="tok-str">'appId'</span> =&gt; $appId, <span class="tok-str">'appKey'</span> =&gt; $appKey, <span class="tok-str">'appSecret'</span> =&gt; $appSecret, <span class="tok-str">'baseUrl'</span> =&gt; $baseUrl]);
+$bp-&gt;trigger(<span class="tok-str">'orders'</span>, <span class="tok-str">'created'</span>, [<span class="tok-str">'id'</span> =&gt; 42]);</pre>
+					</div>
+				</div>
+			</div>
+
+			<p>
+				Non-2xx responses raise a typed error (<code>PulselyError</code>) carrying the
+				status and parsed body, rather than returning silently. Responses:
+				<code>200</code> ok, <code>400</code> malformed, <code>401</code> bad signature,
+				<code>404</code> unknown/inactive app, <code>429</code> daily message limit
+				reached.
+			</p>
+
+			<div class="docs-note">
+				<strong>Four sharp edges, each an unexplained 401 if you miss one:</strong>
+				serialize the body once and sign those exact bytes — re-serializing risks a
+				different key order; use epoch <em>seconds</em>, not milliseconds, in UTC; join
+				the signing string with real newlines (in CFML/BoxLang, <code>"\n"</code> is two
+				literal characters — use <code>char(10)</code>); lowercase hex for both the body
+				hash and the signature. The SDKs get all four right, which is the whole reason
+				to use them instead of rolling your own.
+			</div>
+		</section>
+
+		<!-- ============================================================ channels api -->
+		<section class="docs-section" id="channels-api">
+			<h2>Listing channels</h2>
+			<p>
+				Channels are ephemeral occupancy state, not persistent objects — this is the
+				only way to find out what's currently live without maintaining your own
+				shadow registry. Signed the same way as the trigger API, with an empty body.
+			</p>
+
+			<h3>Every occupied channel</h3>
+			<div class="lang-tabs" data-tabgroup>
+				<div class="tablist" role="tablist" aria-label="List channels, by language">
+					<button class="tab" role="tab" id="tab-channels-curl" aria-controls="panel-channels-curl" aria-selected="true">cURL</button>
+					<button class="tab" role="tab" id="tab-channels-node" aria-controls="panel-channels-node" aria-selected="false">Node.js</button>
+					<button class="tab" role="tab" id="tab-channels-python" aria-controls="panel-channels-python" aria-selected="false">Python</button>
+					<button class="tab" role="tab" id="tab-channels-boxlang" aria-controls="panel-channels-boxlang" aria-selected="false">BoxLang</button>
+					<button class="tab" role="tab" id="tab-channels-php" aria-controls="panel-channels-php" aria-selected="false">PHP</button>
+				</div>
+
+				<div class="docs-lang-panel" role="tabpanel" id="panel-channels-curl" aria-labelledby="tab-channels-curl">
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">list-channels.sh</span></div>
+<pre><span class="tok-fn">TS</span>=$(date +%s)
+<span class="tok-fn">BODY_HASH</span>=$(printf <span class="tok-str">'%s'</span> <span class="tok-str">""</span> | shasum -a 256 | cut -d<span class="tok-str">' '</span> -f1)
+<span class="tok-fn">SIGNING</span>=$(printf <span class="tok-str">'GET\n/apps/%s/channels\n%s\n%s'</span> <span class="tok-str">"$APP_ID"</span> <span class="tok-str">"$TS"</span> <span class="tok-str">"$BODY_HASH"</span>)
+<span class="tok-fn">SIG</span>=$(printf <span class="tok-str">'%s'</span> <span class="tok-str">"$SIGNING"</span> | openssl dgst -sha256 -hmac <span class="tok-str">"$APP_SECRET"</span> | sed <span class="tok-str">'s/^.*= //'</span>)
+
+curl <span class="tok-str">"https://pulsely.dev/apps/$APP_ID/channels?filter_by_prefix=presence-&amp;info=user_count"</span> \
+  -H <span class="tok-str">"X-Pulsely-Timestamp: $TS"</span> \
+  -H <span class="tok-str">"X-Pulsely-Signature: $SIG"</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-channels-node" aria-labelledby="tab-channels-node" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.js</span></div>
+<pre><span class="tok-key">const</span> channels = <span class="tok-key">await</span> bp.<span class="tok-fn">listChannels</span>( { filterByPrefix: <span class="tok-str">'presence-'</span>, info: <span class="tok-str">'user_count'</span> } );
+<span class="tok-com">// { "presence-lobby": { user_count: 3 } }</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-channels-python" aria-labelledby="tab-channels-python" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.py</span></div>
+<pre>channels = bp.list_channels(filter_by_prefix=<span class="tok-str">"presence-"</span>, info=<span class="tok-str">"user_count"</span>)
+<span class="tok-com"># {"presence-lobby": {"user_count": 3}}</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-channels-boxlang" aria-labelledby="tab-channels-boxlang" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.bx</span></div>
+<pre>channels = pulsely.<span class="tok-fn">listChannels</span>( filterByPrefix = <span class="tok-str">"presence-"</span>, info = <span class="tok-str">"user_count"</span> );</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-channels-php" aria-labelledby="tab-channels-php" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.php</span></div>
+<pre>$channels = $bp-&gt;listChannels(<span class="tok-str">'presence-'</span>, <span class="tok-str">'user_count'</span>);</pre>
+					</div>
+				</div>
+			</div>
+
+			<h3>One channel's detail</h3>
+			<div class="lang-tabs" data-tabgroup>
+				<div class="tablist" role="tablist" aria-label="Get one channel, by language">
+					<button class="tab" role="tab" id="tab-getchan-curl" aria-controls="panel-getchan-curl" aria-selected="true">cURL</button>
+					<button class="tab" role="tab" id="tab-getchan-node" aria-controls="panel-getchan-node" aria-selected="false">Node.js</button>
+					<button class="tab" role="tab" id="tab-getchan-python" aria-controls="panel-getchan-python" aria-selected="false">Python</button>
+					<button class="tab" role="tab" id="tab-getchan-boxlang" aria-controls="panel-getchan-boxlang" aria-selected="false">BoxLang</button>
+					<button class="tab" role="tab" id="tab-getchan-php" aria-controls="panel-getchan-php" aria-selected="false">PHP</button>
+				</div>
+
+				<div class="docs-lang-panel" role="tabpanel" id="panel-getchan-curl" aria-labelledby="tab-getchan-curl">
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">get-channel.sh</span></div>
+<pre><span class="tok-com"># Same signing as above, path is /apps/{appId}/channels/{channelName}</span>
+curl <span class="tok-str">"https://pulsely.dev/apps/$APP_ID/channels/orders"</span> \
+  -H <span class="tok-str">"X-Pulsely-Timestamp: $TS"</span> \
+  -H <span class="tok-str">"X-Pulsely-Signature: $SIG"</span>
+<span class="tok-com"># {"occupied":true,"subscription_count":3}</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-getchan-node" aria-labelledby="tab-getchan-node" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.js</span></div>
+<pre><span class="tok-key">const</span> channel = <span class="tok-key">await</span> bp.<span class="tok-fn">getChannel</span>( <span class="tok-str">'presence-lobby'</span> );
+<span class="tok-com">// { occupied: true, subscription_count: 3, user_count: 2 }</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-getchan-python" aria-labelledby="tab-getchan-python" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.py</span></div>
+<pre>channel = bp.get_channel(<span class="tok-str">"presence-lobby"</span>)
+<span class="tok-com"># {"occupied": True, "subscription_count": 3, "user_count": 2}</span></pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-getchan-boxlang" aria-labelledby="tab-getchan-boxlang" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.bx</span></div>
+<pre>channel = pulsely.<span class="tok-fn">getChannel</span>( <span class="tok-str">"presence-lobby"</span> );</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-getchan-php" aria-labelledby="tab-getchan-php" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.php</span></div>
+<pre>$channel = $bp-&gt;getChannel(<span class="tok-str">'presence-lobby'</span>);</pre>
+					</div>
+				</div>
+			</div>
+
+			<p>
+				<code>GET /apps/{appId}/channels</code> returns every occupied channel as
+				<code>{ channel_name: {} }</code>; add <code>?filter_by_prefix=</code> to scope
+				by prefix, and <code>?info=user_count</code> to include member counts inline for
+				presence channels. Query params are never part of the signing string — only the
+				route path is signed. <code>GET /apps/{appId}/channels/{channelName}</code>
+				always returns <code>200</code>, since "not occupied" is a normal state, not a
+				missing resource. <code>user_count</code> (distinct presence members) only
+				appears for <code>presence-</code> channels; <code>subscription_count</code>
+				counts live connections, which can exceed <code>user_count</code> when one user
+				has several tabs open.
+			</p>
+		</section>
+
+		<!-- ============================================================ webhooks -->
+		<section class="docs-section" id="webhooks">
+			<h2>Event webhooks</h2>
+			<p>
+				Your backend doesn't need to hold a socket open to react to what happens in a
+				channel. Register an endpoint from the app page in the dashboard and Pulsely
+				POSTs to it.
+			</p>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Event</th><th>Fires when</th></tr></thead>
+					<tbody>
+						<tr><td><code>channel_occupied</code></td><td>the first subscriber joins a channel</td></tr>
+						<tr><td><code>channel_vacated</code></td><td>the last subscriber leaves</td></tr>
+						<tr><td><code>member_added</code></td><td>someone joins a presence channel</td></tr>
+						<tr><td><code>member_removed</code></td><td>they leave it</td></tr>
+						<tr><td><code>client_event</code></td><td>a browser publishes a client event</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="code-card">
+				<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">delivery payload</span></div>
+<pre>{
+  <span class="tok-key">"event"</span>: <span class="tok-str">"channel_occupied"</span>,
+  <span class="tok-key">"data"</span>: { <span class="tok-key">"channel"</span>: <span class="tok-str">"orders"</span> },
+  <span class="tok-key">"app_id"</span>: <span class="tok-str">"a3f1…"</span>,
+  <span class="tok-key">"created_at"</span>: <span class="tok-str">"2026-07-28T09:14:22"</span>
+}</pre>
+			</div>
+
+			<p>
+				Each request carries <code>X-Pulsely-Timestamp</code> and
+				<code>X-Pulsely-Signature</code>, signed with your app secret using the same
+				scheme as the trigger API — verify against the <strong>raw</strong> body, since
+				a re-serialized object will not match.
+			</p>
+
+			<div class="lang-tabs" data-tabgroup>
+				<div class="tablist" role="tablist" aria-label="Verify a webhook delivery, by language">
+					<button class="tab" role="tab" id="tab-webhook-node" aria-controls="panel-webhook-node" aria-selected="true">Node.js</button>
+					<button class="tab" role="tab" id="tab-webhook-python" aria-controls="panel-webhook-python" aria-selected="false">Python</button>
+				</div>
+
+				<div class="docs-lang-panel" role="tabpanel" id="panel-webhook-node" aria-labelledby="tab-webhook-node">
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.js</span></div>
+<pre>app.<span class="tok-fn">post</span>( <span class="tok-str">'/pulsely/webhook'</span>, express.<span class="tok-fn">raw</span>( { type: <span class="tok-str">'application/json'</span> } ), ( req, res ) =&gt; {
+  <span class="tok-key">if</span> ( !bp.<span class="tok-fn">verifyWebhook</span>( req.body, req.headers ) ) <span class="tok-key">return</span> res.<span class="tok-fn">sendStatus</span>( 401 );
+  <span class="tok-fn">handle</span>( JSON.<span class="tok-fn">parse</span>( req.body ) );
+  res.<span class="tok-fn">sendStatus</span>( 200 );
+} );</pre>
+					</div>
+				</div>
+				<div class="docs-lang-panel" role="tabpanel" id="panel-webhook-python" aria-labelledby="tab-webhook-python" hidden>
+					<div class="code-card">
+						<div class="code-head"><span class="code-dots"><i></i><i></i><i></i></span><span class="code-title">server.py</span></div>
+<pre><span class="tok-key">@app</span>.route(<span class="tok-str">"/pulsely/webhook"</span>, methods=[<span class="tok-str">"POST"</span>])
+<span class="tok-key">def</span> <span class="tok-fn">pulsely_webhook</span>():
+    <span class="tok-key">if not</span> bp.verify_webhook(request.data, request.headers):
+        <span class="tok-key">return</span> <span class="tok-str">""</span>, 401
+    handle(request.get_json())
+    <span class="tok-key">return</span> <span class="tok-str">""</span>, 200</pre>
+					</div>
+				</div>
+			</div>
+
+			<div class="docs-note">
+				<code>verifyWebhook</code> / <code>verify_webhook</code> currently ship on the
+				Node and Python SDKs only. The BoxLang and PHP SDKs don't yet expose it — verify
+				those deliveries by reimplementing the same signing scheme shown in
+				<a href="#trigger-api">Publishing events</a> against
+				<code>X-Pulsely-Timestamp</code> / <code>X-Pulsely-Signature</code> and the path
+				<code>/webhook</code>.
+			</div>
+
+			<p>
+				Delivery is queued, never inline — a customer endpoint that hangs must not
+				stall the broker thread that produced the event. Non-2xx responses retry with
+				backoff (10s, 1m, 5m, 30m) up to five attempts, after which the row stops
+				retrying but stays visible for debugging on the app page. Endpoints only
+				receive the event types they subscribed to, and registering the same URL twice
+				updates it rather than creating a duplicate.
+			</p>
+		</section>
+
+		<!-- ============================================================ browser reference -->
+		<section class="docs-section" id="browser-reference">
+			<h2>Browser SDK reference</h2>
+			<p><code>public/assets/js/pulsely.js</code> — everything on the <code>Pulsely</code> client:</p>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Method</th><th>What it does</th></tr></thead>
+					<tbody>
+						<tr><td><code>new Pulsely(appKey, options)</code></td><td>Create a client. <code>options.authToken</code>, <code>options.url</code></td></tr>
+						<tr><td><code>bp.connect()</code></td><td>Connect. Returns a promise</td></tr>
+						<tr><td><code>bp.subscribe(channel)</code> / <code>bp.unsubscribe(channel)</code></td><td>Join / leave a channel</td></tr>
+						<tr><td><code>bp.bind(event, cb)</code> / <code>bp.unbind(event, cb)</code></td><td>Listen for one event name</td></tr>
+						<tr><td><code>bp.bindGlobal(cb)</code> / <code>bp.unbindGlobal(cb)</code></td><td>Listen for every event</td></tr>
+						<tr><td><code>bp.trigger(channel, event, data)</code></td><td>Publish from the browser (<code>client-*</code> only)</td></tr>
+						<tr><td><code>bp.signin(token)</code></td><td>Sign in as a user, app-wide</td></tr>
+						<tr><td><code>bp.watch()</code></td><td>Subscribe to online/offline for the whole app</td></tr>
+						<tr><td><code>bp.members(channel)</code> / <code>bp.memberCount(channel)</code></td><td>Local presence roster read</td></tr>
+						<tr><td><code>bp.isSubscribed(channel)</code></td><td>Has the broker actually confirmed this channel</td></tr>
+						<tr><td><code>bp.connection.bind('state_change', cb)</code></td><td>Watch connect/disconnect/retry</td></tr>
+						<tr><td><code>bp.disconnect()</code></td><td>Close and stop retrying</td></tr>
+						<tr><td><code>Pulsely.logToConsole = true</code></td><td>Turn on debug tracing</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<h3>Events you'll bind to</h3>
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Event</th><th>Fires when</th></tr></thead>
+					<tbody>
+						<tr><td><em>(your own event names)</em></td><td>Something your server (or a client) published</td></tr>
+						<tr><td><code>subscription_succeeded</code></td><td>A channel subscribe was accepted</td></tr>
+						<tr><td><code>subscription_error</code></td><td>A channel subscribe was refused &mdash; <code>data.reason</code></td></tr>
+						<tr><td><code>subscription_count</code></td><td>A channel's live subscriber count changed</td></tr>
+						<tr><td><code>presence.subscription_succeeded</code></td><td>You joined a presence channel &mdash; <code>data.members</code></td></tr>
+						<tr><td><code>presence.member_added</code> / <code>presence.member_removed</code></td><td>Someone else joined/left</td></tr>
+						<tr><td><code>signin.succeeded</code> / <code>signin.failed</code></td><td>Result of <code>bp.signin()</code></td></tr>
+						<tr><td><code>watchlist.online</code> / <code>watchlist.offline</code></td><td>A signed-in user came online/went offline</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<p>The full task-by-task walkthrough this reference is drawn from lives in <code>pulsely-js-guide.md</code> at the root of the repo.</p>
+		</section>
+
+		<!-- ============================================================ server reference -->
+		<section class="docs-section" id="server-reference">
+			<h2>Server SDK reference</h2>
+			<p>
+				Thin, dependency-free clients — publish, mint tokens, answer auth requests,
+				and (Node/Python) verify webhooks. Each is small enough to read in one
+				sitting.
+			</p>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Language</th><th>File</th><th>Verified against a live broker</th></tr></thead>
+					<tbody>
+						<tr><td>Node.js 18+</td><td><code>sdks/node/pulsely.mjs</code></td><td>Yes</td></tr>
+						<tr><td>Python 3.8+</td><td><code>sdks/python/pulsely.py</code></td><td>Yes</td></tr>
+						<tr><td>BoxLang / CFML</td><td><code>sdks/boxlang/Pulsely.bx</code></td><td>Yes</td></tr>
+						<tr><td>PHP 7.4+</td><td><code>sdks/php/Pulsely.php</code></td><td>No &mdash; written to spec, not yet run against a live broker</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="docs-table-wrap">
+				<table class="docs-table">
+					<thead><tr><th>Method</th><th>What it does</th></tr></thead>
+					<tbody>
+						<tr><td><code>trigger(channel, event, data)</code></td><td>Publish an event</td></tr>
+						<tr><td><code>listChannels(filterByPrefix, info)</code></td><td>Every occupied channel</td></tr>
+						<tr><td><code>getChannel(channelName)</code></td><td>One channel's occupancy detail</td></tr>
+						<tr><td><code>authToken(userId, ttl)</code></td><td>Mint a browser connection token</td></tr>
+						<tr><td><code>authorizeChannel(…)</code></td><td>Build an auth-endpoint response</td></tr>
+						<tr><td><code>verifyWebhook(rawBody, headers)</code></td><td>Verify an inbound delivery &mdash; Node &amp; Python only</td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<p>
+				<code>tests/sdk-check.mjs</code> drives every verified SDK through a real
+				publish, a rejected publish, a channel list/detail lookup, and a connection
+				token that has to survive an actual STOMP CONNECT — and asserts all of them
+				produce byte-identical signatures for a fixed payload, so a divergence in any
+				one fails the build. The full breakdown, including the "why not roll your own"
+				case for the four signing gotchas, lives in <code>sdks/readme.md</code>.
+			</p>
+		</section>
+
+		<!-- ============================================================ admin -->
+		<section class="docs-section" id="admin">
+			<h2>Administration</h2>
+			<p>
+				An account with admin access reaches <a href="/admin">/admin</a>, which lists
+				every account with its plan, app count, and usage today, and can change a
+				plan, suspend or reactivate an account, and grant or revoke administrator
+				access. Authorization is checked server-side on every action — re-read from
+				the database each request, not trusted from the session — so revoking access
+				takes effect immediately rather than at next login. Three guards stop an
+				administrator locking everyone out: you cannot suspend yourself, you cannot
+				revoke your own access, and the last remaining administrator cannot be
+				demoted.
+			</p>
+		</section>
+
+	</div>
+</div>
