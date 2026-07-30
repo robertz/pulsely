@@ -26,6 +26,27 @@
 
 	writeOutput( "token: " & pulsely.authToken( "user-boxlang" ) & LF );
 
+	try {
+		channels = pulsely.listChannels();
+		writeOutput( "listChannels: " & ( isStruct( channels ) ? "ok" : "FAILED" ) & LF );
+	} catch ( any e ) {
+		writeOutput( "listChannels: FAILED " & e.message & LF );
+	}
+
+	try {
+		detail = pulsely.getChannel( "sdk-boxlang-list-check" );
+		writeOutput( "getChannel: " & ( !detail.occupied && detail.subscription_count == 0 ? "ok" : "FAILED" ) & LF );
+	} catch ( any e ) {
+		writeOutput( "getChannel: FAILED " & e.message & LF );
+	}
+
+	try {
+		pulsely.getChannel( "a.b" );
+		writeOutput( "getChannel dotted: NO ERROR" & LF );
+	} catch ( "PulselyError" e ) {
+		writeOutput( "getChannel dotted: " & reReplace( e.message, "[^0-9]", "", "all" ) & LF );
+	}
+
 	badSecret = new sdks.boxlang.Pulsely(
 		appId = APP_ID, appSecret = "wrong", baseUrl = "http://127.0.0.1:8085"
 	);

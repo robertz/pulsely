@@ -69,6 +69,20 @@ check( 'node: auth endpoint helper shape',
 		return r.authorized === true && r.user_id === 'u1' && r.user_info.name === 'Ada';
 	} )() );
 
+const nodeChannels = await node.listChannels();
+check( 'node: listChannels returns an object', typeof nodeChannels === 'object' && nodeChannels !== null, JSON.stringify( nodeChannels ) );
+
+const nodeChannel = await node.getChannel( 'sdk-node-channel-check' );
+check( 'node: getChannel reports unoccupied shape',
+	nodeChannel.occupied === false && nodeChannel.subscription_count === 0, JSON.stringify( nodeChannel ) );
+
+let nodeChannelThrew = null;
+try {
+	await node.getChannel( 'a.b' );
+} catch ( err ) { nodeChannelThrew = err; }
+check( 'node: getChannel refuses a dotted channel name',
+	nodeChannelThrew instanceof PulselyError && nodeChannelThrew.status === 400, nodeChannelThrew?.status );
+
 /* ----------------------------------------------------------------- Python */
 
 const py = ( script ) =>
@@ -100,6 +114,32 @@ except PulselyError as e:
 ` );
 check( 'python: bad secret raises a typed error', pyError === '401', pyError );
 
+const pyChannels = py( `
+from pulsely import Pulsely
+bp = Pulsely(app_id="${APP_ID}", app_key="${APP_KEY}", app_secret="${APP_SECRET}", base_url="${HTTP}")
+print(isinstance(bp.list_channels(), dict))
+` );
+check( 'python: list_channels returns a dict', pyChannels === 'True', pyChannels );
+
+const pyChannel = py( `
+from pulsely import Pulsely
+bp = Pulsely(app_id="${APP_ID}", app_key="${APP_KEY}", app_secret="${APP_SECRET}", base_url="${HTTP}")
+c = bp.get_channel("sdk-python-channel-check")
+print(c["occupied"], c["subscription_count"])
+` );
+check( 'python: get_channel reports unoccupied shape', pyChannel === 'False 0', pyChannel );
+
+const pyChannelError = py( `
+from pulsely import Pulsely, PulselyError
+bp = Pulsely(app_id="${APP_ID}", app_key="${APP_KEY}", app_secret="${APP_SECRET}", base_url="${HTTP}")
+try:
+    bp.get_channel("a.b")
+    print("NO ERROR")
+except PulselyError as e:
+    print(e.status)
+` );
+check( 'python: get_channel refuses a dotted channel name', pyChannelError === '400', pyChannelError );
+
 /* --------------------------------------------------------------- BoxLang */
 
 const bxOut = await ( await fetch( `${HTTP}/sdks/boxlang/selftest.bxm` ) ).text();
@@ -108,6 +148,10 @@ check( 'boxlang: bad secret raises PulselyError', /badsecret: 401/.test( bxOut )
 
 const bxToken = bxOut.match( /token: (\S+)/ )?.[ 1 ] ?? '';
 check( 'boxlang: token authenticates', await connectWith( bxToken ) === 'CONNECTED', bxToken.slice( 0, 24 ) + '…' );
+
+check( 'boxlang: listChannels returns a struct', /listChannels: ok/.test( bxOut ), bxOut.match( /listChannels: \S+/ )?.[ 0 ] );
+check( 'boxlang: getChannel reports unoccupied shape', /getChannel: ok/.test( bxOut ), bxOut.match( /getChannel: \S+/ )?.[ 0 ] );
+check( 'boxlang: getChannel refuses a dotted channel name', /getChannel dotted: 400/.test( bxOut ), bxOut.match( /getChannel dotted: \S+/ )?.[ 0 ] );
 
 /* ------------------------------------------- cross-language signature parity */
 

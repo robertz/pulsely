@@ -61,7 +61,7 @@ export default class Pulsely {
 				headers: {
 					'Content-Type': 'application/json',
 					'X-Pulsely-Timestamp': timestamp,
-					'X-Pulsely-Signature': this.#sign( path, timestamp, payload )
+					'X-Pulsely-Signature': this.#sign( 'POST', path, timestamp, payload )
 				},
 				body: payload,
 				signal: controller.signal
@@ -79,6 +79,75 @@ export default class Pulsely {
 		if ( !res.ok ) {
 			throw new PulselyError(
 				`Pulsely: publish rejected (${res.status}) — ${body?.error ?? text}`,
+				res.status, body
+			);
+		}
+		return body;
+	}
+
+	/**
+	 * Every currently occupied channel, as `{ channel_name: {} }` — or
+	 * `{ user_count: N }` for a presence channel when `info: 'user_count'`.
+	 *
+	 * @throws {PulselyError} on any non-2xx.
+	 */
+	async listChannels( { filterByPrefix, info } = {} ) {
+		const path = `/apps/${this.appId}/channels`;
+		const query = {};
+		if ( filterByPrefix ) query.filter_by_prefix = filterByPrefix;
+		if ( info ) query.info = info;
+		const body = await this.#get( path, query );
+		return body.channels ?? {};
+	}
+
+	/**
+	 * Detail for one channel: `{ occupied, subscription_count, user_count? }`.
+	 * Resolves rather than rejecting for an unoccupied channel — "not
+	 * occupied" is a normal state, not a missing resource.
+	 *
+	 * @throws {PulselyError} on any non-2xx (e.g. an invalid channel name).
+	 */
+	async getChannel( channelName ) {
+		const path = `/apps/${this.appId}/channels/${channelName}`;
+		return this.#get( path, {} );
+	}
+
+	/**
+	 * Signed GET request against the given (unsigned, no query string) path.
+	 * Query params are appended after signing — they are never part of the
+	 * signing string.
+	 */
+	async #get( path, query ) {
+		const timestamp = String( Math.floor( Date.now() / 1000 ) );
+		const signature = this.#sign( 'GET', path, timestamp, '' );
+		const qs = new URLSearchParams( query ).toString();
+		const url = this.baseUrl + path + ( qs ? `?${qs}` : '' );
+
+		const controller = new AbortController();
+		const timer = setTimeout( () => controller.abort(), this.timeoutMs );
+
+		let res;
+		try {
+			res = await fetch( url, {
+				headers: {
+					'X-Pulsely-Timestamp': timestamp,
+					'X-Pulsely-Signature': signature
+				},
+				signal: controller.signal
+			} );
+		} catch ( err ) {
+			throw new PulselyError( `Pulsely: request failed — ${err.message}`, 0, null );
+		} finally {
+			clearTimeout( timer );
+		}
+
+		const text = await res.text();
+		let body;
+		try { body = JSON.parse( text ); } catch { body = text; }
+
+		if ( !res.ok ) {
+			throw new PulselyError(
+				`Pulsely: request rejected (${res.status}) — ${body?.error ?? text}`,
 				res.status, body
 			);
 		}
@@ -130,16 +199,16 @@ export default class Pulsely {
 			return false;
 		}
 
-		const expected = this.#sign( '/webhook', String( timestamp ), rawBody );
+		const expected = this.#sign( 'POST', '/webhook', String( timestamp ), rawBody );
 		const a = Buffer.from( expected );
 		const b = Buffer.from( String( signature ) );
 		return a.length === b.length && crypto.timingSafeEqual( a, b );
 	}
 
-	#sign( path, timestamp, payload ) {
+	#sign( method, path, timestamp, payload ) {
 		const bodyHash = crypto.createHash( 'sha256' ).update( payload ).digest( 'hex' );
 		// Joined by real newlines, not the two characters backslash-n.
-		const signingString = `POST\n${path}\n${timestamp}\n${bodyHash}`;
+		const signingString = `${method.toUpperCase()}\n${path}\n${timestamp}\n${bodyHash}`;
 		return crypto.createHmac( 'sha256', this.appSecret ).update( signingString ).digest( 'hex' );
 	}
 

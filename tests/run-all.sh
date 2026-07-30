@@ -54,6 +54,12 @@ node tests/stomp-check.mjs || FAILED=1
 
 echo
 echo "=============================================================="
+echo " Channel-listing API (occupancy, signed GET requests)"
+echo "=============================================================="
+node tests/channels-check.mjs || FAILED=1
+
+echo
+echo "=============================================================="
 echo " Server SDKs (publish, tokens, signature parity)"
 echo "=============================================================="
 node tests/sdk-check.mjs || FAILED=1

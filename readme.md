@@ -29,6 +29,7 @@ Marketing site: <http://127.0.0.1:8085/> · Dashboard: <http://127.0.0.1:8085/da
 | `/dashboard` | session | Apps list |
 | `/dashboard/app/{appId}` | session | Keys, live tiles, usage, activity, channel rules |
 | `POST /apps/{appId}/events` | HMAC | Trigger API |
+| `GET /apps/{appId}/channels`, `GET /apps/{appId}/channels/{channelName}` | HMAC | Channels API |
 
 Every application file is BoxLang: classes are `.bx`, templates are `.bxm`, and
 tags are `<bx:…>`. There is no CFML left in the app — `.cfm`/`.cfc` files under
@@ -87,7 +88,7 @@ dev data. `AccountServiceSpec` and `WebSocketAuthSpec` do read the seeded dev an
 Protocol-level behavior that TestBox cannot reach — real STOMP frames, the auth
 webhook round trip, HTTP status codes — stays in the shell and Node suites
 (`api-cases.sh`, `dashboard-check.sh`, `limits-and-auth.sh`, `stomp-check.mjs`,
-`auth-webhook-check.mjs`), all wrapped by `run-all.sh`.
+`auth-webhook-check.mjs`, `channels-check.mjs`), all wrapped by `run-all.sh`.
 
 ## Dashboard
 
@@ -218,6 +219,51 @@ timestamps outside `triggerAuthWindowSeconds` (default 600) are rejected.
 
 Responses: `200` ok, `400` malformed, `401` bad signature, `404` unknown/inactive app,
 `429` daily message limit reached.
+
+## Channels API
+
+Read-only occupancy state — channels are ephemeral, not persistent objects, so this
+is the only way to find out what's currently live without maintaining your own
+shadow registry. Signed the same way as the trigger API, with an empty body:
+
+```
+GET /apps/{appId}/channels
+GET /apps/{appId}/channels/{channelName}
+X-Pulsely-Timestamp: {epochSeconds}
+X-Pulsely-Signature: {hex}
+```
+
+```
+GET\n/apps/{appId}/channels\n{timestamp}\n{sha256("")}
+```
+
+Only the route path is signed — query params (`filter_by_prefix`, `info`) are never
+part of the signing string.
+
+`GET /apps/{appId}/channels` returns every occupied channel as a map of
+`channel_name -> {}`:
+
+```json
+{ "channels": { "orders": {}, "presence-lobby": {} } }
+```
+
+- `?filter_by_prefix=presence-` scopes the result to channel names with that prefix.
+- `?info=user_count` includes `{ "user_count": N }` inline for presence channels,
+  instead of `{}`.
+
+`GET /apps/{appId}/channels/{channelName}` returns detail for one channel — always
+`200`, since "not occupied" is a normal state, not a missing resource:
+
+```json
+{ "occupied": true, "subscription_count": 3, "user_count": 2 }
+```
+
+`user_count` (distinct presence members, not connection count) only appears for
+`presence-` channels. `subscription_count` counts live subscriptions (tabs), which
+can exceed `user_count` when one user has multiple tabs open.
+
+Responses: `200` ok, `400` malformed channel name, `401` bad signature, `404`
+unknown/inactive app.
 
 ## Administration
 

@@ -58,7 +58,7 @@ class {
 			throwOnError="false" result="local.result" {
 			bx:httpparam type="header" name="Content-Type" value="application/json";
 			bx:httpparam type="header" name="X-Pulsely-Timestamp" value="#timestamp#";
-			bx:httpparam type="header" name="X-Pulsely-Signature" value="#sign( path, timestamp, payload )#";
+			bx:httpparam type="header" name="X-Pulsely-Signature" value="#sign( "POST", path, timestamp, payload )#";
 			bx:httpparam type="body" value="#payload#";
 		}
 
@@ -70,6 +70,73 @@ class {
 			throw(
 				type    = "PulselyError",
 				message = "Pulsely: publish rejected (#status#)",
+				detail  = body.error ?: raw
+			);
+		}
+
+		return body;
+	}
+
+	/**
+	 * Every currently occupied channel, as { "channel_name": {} } — or
+	 * { "user_count": N } for a presence channel when info="user_count".
+	 *
+	 * @throws PulselyError on any non-2xx.
+	 */
+	struct function listChannels( string filterByPrefix = "", string info = "" ) {
+		var path = "/apps/" & variables.appId & "/channels";
+		var query = {};
+		if ( arguments.filterByPrefix.len() ) {
+			query[ "filter_by_prefix" ] = arguments.filterByPrefix;
+		}
+		if ( arguments.info.len() ) {
+			query[ "info" ] = arguments.info;
+		}
+		return httpGet( path, query ).channels ?: {};
+	}
+
+	/**
+	 * Detail for one channel: { occupied, subscription_count, user_count? }.
+	 * Always returns rather than throwing on an unoccupied channel — "not
+	 * occupied" is a normal state, not a missing resource.
+	 *
+	 * @throws PulselyError on any non-2xx (e.g. an invalid channel name).
+	 */
+	struct function getChannel( required string channelName ) {
+		var path = "/apps/" & variables.appId & "/channels/" & arguments.channelName;
+		return httpGet( path, {} );
+	}
+
+	/**
+	 * Signed GET request against the given (unsigned, no query string) path.
+	 * Query params are appended after signing — they are never part of the
+	 * signing string.
+	 */
+	private struct function httpGet( required string path, required struct query ) {
+		var timestamp = int( getTickCount() / 1000 );
+		var signature = sign( "GET", arguments.path, timestamp, "" );
+		var requestUrl = variables.baseUrl & arguments.path;
+		if ( !arguments.query.isEmpty() ) {
+			requestUrl &= "?" & arguments.query
+				.keyArray()
+				.map( ( key ) => encodeForURL( key ) & "=" & encodeForURL( arguments.query[ key ] ) )
+				.toList( "&" );
+		}
+
+		bx:http url="#requestUrl#" method="GET" timeout="#variables.timeout#"
+			throwOnError="false" result="local.result" {
+			bx:httpparam type="header" name="X-Pulsely-Timestamp" value="#timestamp#";
+			bx:httpparam type="header" name="X-Pulsely-Signature" value="#signature#";
+		}
+
+		var status = val( local.result.status_code ?: 0 );
+		var raw    = local.result.fileContent ?: "";
+		var body   = isJSON( raw ) ? jsonDeserialize( raw ) : { "error" : raw };
+
+		if ( status < 200 || status > 299 ) {
+			throw(
+				type    = "PulselyError",
+				message = "Pulsely: request rejected (#status#)",
 				detail  = body.error ?: raw
 			);
 		}
@@ -113,14 +180,20 @@ class {
 	}
 
 	/**
-	 * POST \n path \n timestamp \n sha256(body), joined by real newlines, then
-	 * HMAC-SHA256 with the app secret as lowercase hex.
+	 * METHOD \n path \n timestamp \n sha256(body), joined by real newlines,
+	 * then HMAC-SHA256 with the app secret as lowercase hex. `body` is "" for
+	 * a GET; `path` never includes a query string.
 	 */
-	private string function sign( required string path, required numeric timestamp, required string payload ) {
+	private string function sign(
+		required string httpMethod,
+		required string path,
+		required numeric timestamp,
+		required string payload
+	) {
 		// char(10), not "\n" — BoxLang does not process backslash escapes in
 		// double-quoted strings, so "\n" would be two literal characters.
 		var LF = char( 10 );
-		var signingString = "POST" & LF
+		var signingString = ucase( arguments.httpMethod ) & LF
 			& arguments.path & LF
 			& arguments.timestamp & LF
 			& lcase( hash( arguments.payload, "SHA-256" ) );

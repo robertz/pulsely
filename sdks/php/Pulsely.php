@@ -76,7 +76,7 @@ class Pulsely
             CURLOPT_HTTPHEADER     => [
                 'Content-Type: application/json',
                 'X-Pulsely-Timestamp: ' . $timestamp,
-                'X-Pulsely-Signature: ' . $this->sign($path, $timestamp, $payload),
+                'X-Pulsely-Signature: ' . $this->sign('POST', $path, $timestamp, $payload),
             ],
         ]);
 
@@ -98,6 +98,87 @@ class Pulsely
             $detail = is_array($body) && isset($body['error']) ? $body['error'] : $raw;
             throw new PulselyError(
                 "Pulsely: publish rejected ({$status}) — {$detail}", $status, $body
+            );
+        }
+
+        return $body;
+    }
+
+    /**
+     * Every currently occupied channel, as ['channel_name' => []] — or
+     * ['user_count' => N] for a presence channel when info is 'user_count'.
+     *
+     * @throws PulselyError on any non-2xx.
+     */
+    public function listChannels($filterByPrefix = '', $info = '')
+    {
+        $path = '/apps/' . $this->appId . '/channels';
+        $query = [];
+        if ($filterByPrefix !== '') {
+            $query['filter_by_prefix'] = $filterByPrefix;
+        }
+        if ($info !== '') {
+            $query['info'] = $info;
+        }
+        $body = $this->get($path, $query);
+        return is_array($body) && isset($body['channels']) ? $body['channels'] : [];
+    }
+
+    /**
+     * Detail for one channel: ['occupied' => ..., 'subscription_count' => ...,
+     * 'user_count' => ...?]. Returns rather than throwing for an unoccupied
+     * channel — "not occupied" is a normal state, not a missing resource.
+     *
+     * @throws PulselyError on any non-2xx (e.g. an invalid channel name).
+     */
+    public function getChannel($channelName)
+    {
+        $path = '/apps/' . $this->appId . '/channels/' . $channelName;
+        return $this->get($path, []);
+    }
+
+    /**
+     * Signed GET request against the given (unsigned, no query string) path.
+     * Query params are appended after signing — they are never part of the
+     * signing string.
+     */
+    private function get($path, array $query)
+    {
+        $timestamp = (string) time();
+        $signature = $this->sign('GET', $path, $timestamp, '');
+        $url = $this->baseUrl . $path;
+        if (!empty($query)) {
+            $url .= '?' . http_build_query($query);
+        }
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => $this->timeout,
+            CURLOPT_HTTPHEADER     => [
+                'X-Pulsely-Timestamp: ' . $timestamp,
+                'X-Pulsely-Signature: ' . $signature,
+            ],
+        ]);
+
+        $raw    = curl_exec($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error  = curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false) {
+            throw new PulselyError('Pulsely: request failed — ' . $error);
+        }
+
+        $body = json_decode($raw, true);
+        if ($body === null) {
+            $body = $raw;
+        }
+
+        if ($status < 200 || $status > 299) {
+            $detail = is_array($body) && isset($body['error']) ? $body['error'] : $raw;
+            throw new PulselyError(
+                "Pulsely: request rejected ({$status}) — {$detail}", $status, $body
             );
         }
 
@@ -137,12 +218,12 @@ class Pulsely
         ];
     }
 
-    private function sign($path, $timestamp, $payload)
+    private function sign($method, $path, $timestamp, $payload)
     {
         $bodyHash = hash('sha256', $payload);
         // Joined by real newlines — double-quoted "\n" in PHP is a real newline,
         // so this is correct here, unlike in CFML/BoxLang.
-        $signingString = "POST\n{$path}\n{$timestamp}\n{$bodyHash}";
+        $signingString = strtoupper($method) . "\n{$path}\n{$timestamp}\n{$bodyHash}";
 
         return hash_hmac('sha256', $signingString, $this->appSecret);
     }

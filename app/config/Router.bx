@@ -3,6 +3,9 @@ class {
 	function configure() {
 		route( "/apps/:appId/events" ).withAction( { POST: "trigger" } ).toHandler( "Events" );
 
+		route( "/apps/:appId/channels/:channelName" ).withAction( { GET: "channel" } ).toHandler( "Channels" );
+		route( "/apps/:appId/channels" ).withAction( { GET: "channels" } ).toHandler( "Channels" );
+
 		route( "/dashboard/app/:appId" ).to( "Dashboard.app" );
 		route( "/dashboard/login" ).withAction( { GET: "login", POST: "doLogin" } ).toHandler( "Dashboard" );
 		route( "/dashboard/signup" ).withAction( { GET: "signup", POST: "doSignup" } ).toHandler( "Dashboard" );

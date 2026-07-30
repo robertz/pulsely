@@ -20,6 +20,7 @@ import hmac
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -63,7 +64,7 @@ class Pulsely:
             headers={
                 "Content-Type": "application/json",
                 "X-Pulsely-Timestamp": timestamp,
-                "X-Pulsely-Signature": self._sign(path, timestamp, payload),
+                "X-Pulsely-Signature": self._sign("POST", path, timestamp, payload),
             },
         )
 
@@ -75,6 +76,65 @@ class Pulsely:
             message = body.get("error", body) if isinstance(body, dict) else body
             raise PulselyError(
                 f"Pulsely: publish rejected ({err.code}) — {message}", err.code, body
+            ) from None
+        except urllib.error.URLError as err:
+            raise PulselyError(f"Pulsely: request failed — {err.reason}") from None
+
+    def list_channels(self, filter_by_prefix=None, info=None):
+        """
+        Every currently occupied channel, as {"channel_name": {}} — or
+        {"user_count": N} for a presence channel when info="user_count".
+
+        Raises PulselyError on any non-2xx.
+        """
+        path = f"/apps/{self.app_id}/channels"
+        query = {}
+        if filter_by_prefix:
+            query["filter_by_prefix"] = filter_by_prefix
+        if info:
+            query["info"] = info
+        return self._get(path, query).get("channels", {})
+
+    def get_channel(self, channel_name):
+        """
+        Detail for one channel: {occupied, subscription_count, user_count?}.
+        Returns rather than raising for an unoccupied channel — "not
+        occupied" is a normal state, not a missing resource.
+
+        Raises PulselyError on any non-2xx (e.g. an invalid channel name).
+        """
+        path = f"/apps/{self.app_id}/channels/{channel_name}"
+        return self._get(path, {})
+
+    def _get(self, path, query):
+        """
+        Signed GET request against the given (unsigned, no query string)
+        path. Query params are appended after signing — they are never part
+        of the signing string.
+        """
+        timestamp = str(int(time.time()))
+        signature = self._sign("GET", path, timestamp, b"")
+        url = self.base_url + path
+        if query:
+            url += "?" + urllib.parse.urlencode(query)
+
+        request = urllib.request.Request(
+            url,
+            method="GET",
+            headers={
+                "X-Pulsely-Timestamp": timestamp,
+                "X-Pulsely-Signature": signature,
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return self._parse(response.read())
+        except urllib.error.HTTPError as err:
+            body = self._parse(err.read())
+            message = body.get("error", body) if isinstance(body, dict) else body
+            raise PulselyError(
+                f"Pulsely: request rejected ({err.code}) — {message}", err.code, body
             ) from None
         except urllib.error.URLError as err:
             raise PulselyError(f"Pulsely: request failed — {err.reason}") from None
@@ -132,13 +192,13 @@ class Pulsely:
         if isinstance(raw_body, str):
             raw_body = raw_body.encode("utf-8")
 
-        expected = self._sign("/webhook", str(timestamp), raw_body)
+        expected = self._sign("POST", "/webhook", str(timestamp), raw_body)
         return hmac.compare_digest(expected, str(signature))
 
-    def _sign(self, path, timestamp, payload):
+    def _sign(self, method, path, timestamp, payload):
         body_hash = hashlib.sha256(payload).hexdigest()
         # Joined by real newlines, not the two characters backslash-n.
-        signing_string = f"POST\n{path}\n{timestamp}\n{body_hash}"
+        signing_string = f"{method.upper()}\n{path}\n{timestamp}\n{body_hash}"
         return hmac.new(
             self.app_secret.encode("utf-8"), signing_string.encode("utf-8"), hashlib.sha256
         ).hexdigest()

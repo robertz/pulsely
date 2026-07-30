@@ -1,0 +1,194 @@
+/**
+ * Server-side channel-listing API — read-only occupancy state for a broker
+ * that doesn't otherwise let an integrator know what's currently live.
+ *
+ * GET /apps/{appId}/channels
+ * GET /apps/{appId}/channels/{channelName}
+ * headers: X-Pulsely-Timestamp, X-Pulsely-Signature
+ * body:    (empty — signed the same way as the trigger API, with body="")
+ */
+class {
+	property name="appService" inject="AppService";
+
+	property name="signatureService" inject="SignatureService";
+
+	property name="presenceService" inject="PresenceService";
+
+	variables.PRESENCE_PREFIX = "presence-";
+
+	/**
+	 * GET /apps/{appId}/channels — every currently occupied channel.
+	 *
+	 * @queryParam filter_by_prefix scope the result to channel names starting
+	 * with this prefix (e.g. "presence-").
+	 * @queryParam info             pass "user_count" to include member counts
+	 * inline for presence channels — avoids one round trip per channel.
+	 */
+	function channels( event, rc, prc ) {
+		event.getResponse().setFormat( "json" );
+
+		var appId = rc.appId ?: "";
+		var tenantApp = appService.getActiveAppById( appId );
+
+		if ( tenantApp.isEmpty() ) {
+			return respond(
+				event,
+				404,
+				{ "error": "Unknown or inactive app." }
+			);
+		}
+
+		var authFailure = verifyRequest( event, tenantApp.appSecret, "GET", "/apps/#appId#/channels" );
+		if ( !isNull( authFailure ) ) {
+			return respond( event, 401, authFailure );
+		}
+
+		var filterByPrefix = trim( rc.filter_by_prefix ?: "" );
+		var includeUserCount = trim( rc.info ?: "" ) == "user_count";
+		var prefix = appId & ".";
+		var subs = getWebSocketBroker().getSubscriptions();
+		var result = {};
+
+		for ( var destination in subs.keyArray() ) {
+			if ( !destination.startsWith( prefix ) ) {
+				continue;
+			}
+
+			var channelName = destination.mid( prefix.len() + 1, destination.len() );
+
+			// Reserved, broker-internal destinations ($ops, $watchlist, $signin)
+			// are not customer channels and never appear in a listing.
+			if ( channelName.startsWith( "$" ) ) {
+				continue;
+			}
+
+			if ( subs[ destination ].isEmpty() ) {
+				continue;
+			}
+
+			if ( filterByPrefix.len() && !channelName.startsWith( filterByPrefix ) ) {
+				continue;
+			}
+
+			result[ channelName ] = {};
+
+			if ( includeUserCount && channelName.startsWith( variables.PRESENCE_PREFIX ) ) {
+				result[ channelName ] = { "user_count": presenceService.memberCount( destination ) };
+			}
+		}
+
+		return respond(
+			event,
+			200,
+			{ "channels": result }
+		);
+	}
+
+	/**
+	 * GET /apps/{appId}/channels/{channelName} — detail for one channel. Always
+	 * 200 with occupied=false rather than 404 — a channel is ephemeral occupancy
+	 * state, not a resource that either exists or doesn't.
+	 */
+	function channel( event, rc, prc ) {
+		event.getResponse().setFormat( "json" );
+
+		var appId = rc.appId ?: "";
+		var channelName = rc.channelName ?: "";
+		var tenantApp = appService.getActiveAppById( appId );
+
+		if ( tenantApp.isEmpty() ) {
+			return respond(
+				event,
+				404,
+				{ "error": "Unknown or inactive app." }
+			);
+		}
+
+		var authFailure = verifyRequest( event, tenantApp.appSecret, "GET", "/apps/#appId#/channels/#channelName#" );
+		if ( !isNull( authFailure ) ) {
+			return respond( event, 401, authFailure );
+		}
+
+		// Same reserved-name rule as the trigger API — a dot could otherwise be
+		// crafted to address a sibling app's namespace, and `$` is broker-internal.
+		if ( channelName.find( "." ) || channelName.startsWith( "$" ) ) {
+			return respond(
+				event,
+				400,
+				{ "error": "Invalid channel name." }
+			);
+		}
+
+		var destination = "#appId#.#channelName#";
+		var subs = getWebSocketBroker().getSubscriptions()[ destination ] ?: {};
+		var subscriptionCount = subs.count();
+
+		var body = {
+			"occupied"          : subscriptionCount > 0,
+			"subscription_count": subscriptionCount
+		};
+
+		if ( channelName.startsWith( variables.PRESENCE_PREFIX ) ) {
+			body[ "user_count" ] = presenceService.memberCount( destination );
+		}
+
+		return respond( event, 200, body );
+	}
+
+	/**
+	 * @return a struct error body when the signature is missing/invalid, or
+	 * null (via isNull()) when the request is authenticated.
+	 */
+	private function verifyRequest(
+		required event,
+		required string appSecret,
+		required string httpMethod,
+		required string path
+	) {
+		var rawBody = event.getHTTPContent();
+		var timestamp = event.getHTTPHeader( "X-Pulsely-Timestamp", "" );
+		var signature = event.getHTTPHeader( "X-Pulsely-Signature", "" );
+
+		var authWindow = val(
+			getSetting( name = "triggerAuthWindowSeconds", defaultValue = 600 )
+		);
+
+		var signatureOK = signatureService.verify(
+				arguments.appSecret,
+				arguments.httpMethod,
+				arguments.path,
+				timestamp,
+				rawBody,
+				signature,
+				authWindow
+			);
+
+		if ( !signatureOK ) {
+			return { "error": "Invalid signature." };
+		}
+	}
+
+	/**
+	 * The broker keeps all its state in the application scope, so a throwaway
+	 * instance routes into the same live subscriptions as the socket listener.
+	 */
+	private function getWebSocketBroker() {
+		return new wwwroot.WebSocket();
+	}
+
+	private function respond(
+		required event,
+		required numeric statusCode,
+		required struct body
+	) {
+		event
+			.getResponse()
+			.setStatusCode( statusCode )
+			.setData( body );
+		return event.renderData(
+				type       = "json",
+				data       = body,
+				statusCode = statusCode
+			);
+	}
+}
