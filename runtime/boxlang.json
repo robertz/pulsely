@@ -20,7 +20,10 @@
 	"debugMode": "${env.BOXLANG_DEBUG:false}",
 	// This setting if enabled will remove all the class files from the class generation directory
 	// This is useful for debugging and testing, but not recommended for production
-	"clearClassFilesOnStartup": true,
+	// Defaults to the development behaviour; the Dockerfile turns it off so the
+	// classes compiled during the image warmup survive into the container and
+	// the first request doesn't recompile ColdBox and the whole app.
+	"clearClassFilesOnStartup": "${env.BOXLANG_CLEAR_CLASSES:true}",
 	// This enables the class locations cache for the runtime.  It's used when resolving class paths
 	// mostly using mappings, per request mappings, etc.
 	// We recommend you always enable this setting, unless debugging a very specific issue
@@ -28,7 +31,9 @@
 	// This enables the runnable loader's cache on disk for compiled BoxLang classes
 	// This means that it will load a Boxlang class and never inspect the file again
 	// Turn this on for production, but off for development so you can see your changes
-	"trustedCache": false,
+	// Left off by default for local dev; the Dockerfile turns it on, which is safe
+	// only because the image is immutable - nothing writes templates at runtime.
+	"trustedCache": "${env.BOXLANG_TRUSTED_CACHE:false}",
 	// The default timezone for the runtime; defaults to the JVM timezone if empty
 	// Please use the IANA timezone database values
 	"timezone": "",

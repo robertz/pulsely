@@ -51,6 +51,14 @@ ENV ENVIRONMENT=production \
     BOXLANG_DEBUG=false \
     BOX_SERVER_APP_CFENGINE=boxlang@1.15.0+52
 
+# Production class caching. Defaults in boxlang.json are the dev-friendly
+# values; set before the warmup so classes compiled during the build survive
+# into the container instead of being wiped and recompiled on first request.
+# trustedCache never re-stats a template, which is correct for an immutable
+# image but would hide edits if anything ever wrote templates at runtime.
+ENV BOXLANG_CLEAR_CLASSES=false \
+    BOXLANG_TRUSTED_CACHE=true
+
 # The base image ships a serverHome with boxlang@1.7.0+43 already deployed.
 # Asking for any other engine makes CommandBox refuse to redeploy over it
 # ("this server home already has [boxlang@1.7.0+43] deployed to it") and it
@@ -61,6 +69,15 @@ RUN rm -rf /usr/local/lib/serverHome
 # rather than downloaded on every container start. Without this, App Platform
 # stalled past the readiness probe with no output while resolving the engine.
 RUN ${BUILD_DIR}/util/warmup-server.sh
+
+# Seed the finalized startup script. Without this, every container start spends
+# ~4m36s in "Generating server startup script" - CommandBox is itself a CFML
+# app, so `box server start` boots a full Lucee JVM just to resolve config and
+# emit a shell script, and it redoes that on every boot. With FINALIZE_STARTUP
+# set, start-server.sh writes the result to startup-final.sh, which run.sh then
+# uses authoritatively and skips CommandBox entirely. Runwar bound 3s after
+# handoff, so this is nearly all of the startup cost.
+RUN FINALIZE_STARTUP=true ${BUILD_DIR}/run.sh
 
 EXPOSE 8080
 
