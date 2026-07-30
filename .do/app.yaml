@@ -1,3 +1,11 @@
+# WARNING: do not apply this file wholesale with `doctl apps update --spec`.
+# The JWT_SECRET and S3_* values below are EDIT_IN_UI placeholders, while the
+# live app holds real encrypted secrets - applying this file would overwrite
+# them with the literal string "EDIT_IN_UI". To change live configuration,
+# export the current spec (`doctl apps get <id> -o json`), edit only what you
+# mean to change so the EV[...] ciphertext is carried through untouched, and
+# apply that. This file is the record of intent, not the deployment source;
+# git pushes deploy against the live spec.
 name: pulsely
 region: nyc
 
@@ -26,11 +34,18 @@ services:
     http_port: 8080
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-2gb
+    # / routes through ColdBox to Home.index, which queries the plans table,
+    # so this probe needs the whole stack up. On a 1 vCPU instance the server
+    # took ~186s to bind and the first request compiles templates, so both the
+    # window and the per-probe timeout have to be generous. timeout_seconds
+    # defaults to 1, which the first request cannot possibly meet.
     health_check:
       http_path: /
-      initial_delay_seconds: 90
-      period_seconds: 10
-      failure_threshold: 6
+      initial_delay_seconds: 240
+      period_seconds: 15
+      timeout_seconds: 15
+      failure_threshold: 15
+      success_threshold: 1
     envs:
       - key: ENVIRONMENT
         value: production
