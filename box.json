@@ -38,7 +38,8 @@
     },
     "scripts":{
         "format":"!boxlang format --source app/,tests/specs/,*.bx",
-        "format:check":"!boxlang format --check --source app/,tests/specs/,*.bx"
+        "format:check":"!boxlang format --check --source app/,tests/specs/,*.bx",
+        "postInstallAll":"!bash patches/socketbox/apply.sh"
     },
     "testbox":{
         "runner":"/tests/runner.bxm"

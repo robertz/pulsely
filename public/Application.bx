@@ -39,6 +39,27 @@ class{
 				"defaultLastAccessTimeout": 1800,
 				"reapFrequency": 300
 			}
+		},
+		// Dedicated table for SocketBox cluster peer discovery — kept separate from
+		// pulselyCache (the session store) so the cluster manager's ~2-second
+		// heartbeat writes can't collide with session rows or contend for the same
+		// table. Must still be JDBC-backed: cluster peer discovery only works if
+		// every node in the cluster shares the same external store.
+		"pulselyClusterPeers": {
+			"enabled": true,
+			"provider": "BoxCacheProvider",
+			"properties": {
+				"objectStore": "JDBCStore",
+				"datasource": "pulsely",
+				"table": "pulselyClusterPeers",
+				"autoCreate": true,
+				"maxObjects": 1000,
+				"evictionPolicy": "LRU",
+				"evictCount": 50,
+				"defaultTimeout": 3600,
+				"defaultLastAccessTimeout": 1800,
+				"reapFrequency": 300
+			}
 		}
 	}
 

@@ -28,6 +28,11 @@ RUN box install commandbox-boxlang --system
 # so they can only come from ForgeBox at build time.
 RUN box install --production
 
+# box.json's postInstallAll script already runs patches/socketbox/apply.sh
+# after any `box install`, but this explicit call is belt-and-suspenders
+# for the Docker build specifically. See patches/socketbox/README.md.
+RUN bash patches/socketbox/apply.sh
+
 # ColdBox's LoaderService.createDefaultLogBox() unconditionally bootstraps
 # using coldbox.system.web.config.LogBox, before any app-level LogBox
 # config is ever consulted. That vendored default registers the console

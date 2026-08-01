@@ -58,6 +58,12 @@ class {
 						maxObjects                    : 300,
 						objectStore                   : "ConcurrentSoftReferenceStore" // memory sensitive
 					}
+				},
+				SocketBoxCluster = {
+					provider   = "coldbox.system.cache.providers.BoxLangProvider",
+					properties = {
+						cacheName = "pulselyClusterPeers"
+					}
 				}
 			}
 		};

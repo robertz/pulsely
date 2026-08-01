@@ -1,0 +1,54 @@
+# Two-node SocketBox cluster test rig. NOT for production — see
+# docs/socketbox-cluster-todo.md for why this exists (verifying cross-node
+# delivery/aggregation and the peer-connection-stability question outside
+# CommandBox's local server-management quirks).
+#
+# Both nodes build from the same Dockerfile, get stable hostnames via Docker's
+# own DNS (avoiding the .local mDNS resolution CommandBox ran into locally),
+# and share the host's existing MySQL/pulsely database through a scoped
+# test-only user (pulsely_docker_test) so seeded app data (app keys, etc.)
+# is available without re-running migrations.
+#
+# Usage:
+#   docker compose -f docker-compose.cluster-test.yml up --build
+#   node1 -> http://localhost:18085  node2 -> http://localhost:18086
+#   docker compose -f docker-compose.cluster-test.yml down
+
+services:
+  node1:
+    build: .
+    hostname: node1
+    environment:
+      DB_HOST: host.docker.internal
+      DB_PORT: "3306"
+      DB_DATABASE: pulsely
+      DB_USER: pulsely_docker_test
+      DB_PASSWORD: docker_test_only
+      BOXLANG_DEBUG: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "18085:8080"
+    networks:
+      - cluster-test
+
+  node2:
+    build: .
+    hostname: node2
+    environment:
+      DB_HOST: host.docker.internal
+      DB_PORT: "3306"
+      DB_DATABASE: pulsely
+      DB_USER: pulsely_docker_test
+      DB_PASSWORD: docker_test_only
+      BOXLANG_DEBUG: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "18086:8080"
+    networks:
+      - cluster-test
+
+networks:
+  cluster-test:
+    driver: bridge

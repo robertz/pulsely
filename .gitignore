@@ -32,6 +32,7 @@ effective-pom.xml
 lib/**
 !lib/java/
 !lib/java/.gitkeep
+!lib/java/*.jar
 !lib/modules/
 !lib/modules/.gitkeep
 boxlang_modules/**

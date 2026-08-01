@@ -26,13 +26,41 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	// sendToConnection() only ever targets the one connection that sent the
 	// token, so there is nothing to gate the way $ops/$watchlist are.
 	variables.SIGNIN_CHANNEL    = "$signin";
+	// Tag for a fan-out forwarded to cluster peers (see clusterFanOut() /
+	// onManagementMessage()) — must not collide with the socketbox module's own
+	// reserved prefixes (__message_rebroadcast__, __STOMP_message_rebroadcast__,
+	// __peer_discovered__, __rpc_request__, __rpc_response__).
+	variables.CLUSTER_FANOUT_PREFIX = "__pulsely_fanout__";
+    function configure(){
+        return {
+            "debugMode": false,
+			"heartBeatMS": 10000,
+            "cluster" : {
+                // Enable cluster mode.
+                "enable" : true,
+                // This can be any string-- a GUID is fine.  Just generate it once and ensure all servers in the cluster use the same secret key.
+                "secretKey" : "44ea1048-d1ee-4a55-a9c8-1ab93acd0df4",
+                // address for other servers to connect to this node
+                "name" : "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#cgi.server_port#/ws",
+                // A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
+                // A CacheBox provider is perfect for this and offers disk, JDBC, CF/Lucee, Couchbase, Redis, or Memcached backends.
+                // You can also provide your own custom cache provider as long as it has get(), set(), and clear() methods.
+                // Note, get() must return null if the key is not found.
+                // ALL nodes in the cluster MUST share the same external data store.  This cache will be used for registration and discovery of the other nodes in the cluster
+                //
+                // Must be the actual cache provider object, not its name as a string — ClusterManager
+                // checks isSimpleValue() on this and silently treats a string as "no cache provider
+                // configured". Backed by the dedicated "pulselyClusterPeers" JDBC cache region
+                // (public/Application.bx) via the "SocketBoxCluster" CacheBox alias (app/config/CacheBox.bx)
+                // — kept separate from "pulselyCache" (the session store) so the cluster manager's
+                // ~2-second heartbeat writes don't collide with session rows.
+                "cacheProvider" : application.wirebox.getInstance( "cachebox:SocketBoxCluster" ),
+                // Use this if more than one SocketBox cluster is sharing the same backend cache provider.  This prefix will be added to add cache keys
+                "cachePrefix" : ""
+            }
+        }
+    }
 
-	function configure() {
-		return {
-			"debugMode"   : false,
-			"heartBeatMS" : 10000
-		};
-	}
 
 	/* ------------------------------------------------------------ services */
 
@@ -111,11 +139,51 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	 * connections.changed — no per-app opt-in for v1.
 	 */
 	private function broadcastSubscriptionCount( required string destination ) {
+		var payload = jsonSerialize( { "event" : "subscription_count", "data" : { "count" : clusterSubscriberCount( destination ) } } );
+		clusterFanOut( destination, payload );
+	}
+
+	/**
+	 * A watchlist.online / watchlist.offline transition, to everyone currently
+	 * subscribed to this app's $watchlist. No per-user filtering in v1: a
+	 * subscriber sees every signed-in user's transitions, not a chosen subset.
+	 *
+	 * Unlike subscription counts / presence, this carries no aggregated number —
+	 * just an identity and an event name — so cluster-wide delivery is all it
+	 * needs. wasFirstConnection/wasLastConnection (WatchlistService.bx) are
+	 * still decided from local-only state, so a user connecting from a second
+	 * node can still re-fire watchlist.online; see docs/socketbox-cluster-todo.md.
+	 */
+	private function broadcastWatchlist( required string appId, required string eventName, required string userId ) {
+		var destination = appId & "." & variables.WATCHLIST_CHANNEL;
+		var payload = jsonSerialize( { "event" : eventName, "data" : { "user_id" : userId } } );
+		clusterFanOut( destination, payload );
+	}
+
+	private string function channelNameFrom( required string appId, required string destination ) {
+		return destination.startsWith( appId & "." )
+			? destination.mid( appId.len() + 2, destination.len() )
+			: destination;
+	}
+
+	/* ------------------------------------------------- cluster fan-out/RPC */
+
+	/**
+	 * Deliver a payload to every LOCAL subscriber of a destination, optionally
+	 * skipping one connection. The single-node half of clusterFanOut() — also
+	 * the replay target when a fan-out arrives from a cluster peer via
+	 * onManagementMessage(), which is why exceptChannelHash is never passed in
+	 * that case (a peer can never hold the excepted connection — see
+	 * clusterFanOut()).
+	 */
+	private function localFanOut( required string destination, required string payload, string exceptChannelHash="" ) {
 		var subs = getSubscriptions()[ destination ] ?: {};
-		var payload = jsonSerialize( { "event" : "subscription_count", "data" : { "count" : subs.count() } } );
 
 		for ( var key in subs.keyArray() ) {
 			var subscription = subs[ key ] ?: {};
+			if ( len( exceptChannelHash ) && ( subscription.channelID ?: "" ) == exceptChannelHash ) {
+				continue;
+			}
 			try {
 				// subscription/message-id headers set per recipient — see the note
 				// on sendToConnection(); without them a real client drops this.
@@ -134,37 +202,87 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	}
 
 	/**
-	 * A watchlist.online / watchlist.offline transition, to everyone currently
-	 * subscribed to this app's $watchlist — same header-per-recipient pattern as
-	 * broadcastSubscriptionCount(). No per-user filtering in v1: a subscriber
-	 * sees every signed-in user's transitions, not a chosen subset.
+	 * localFanOut() plus, in cluster mode, a forward to every peer so their own
+	 * local subscribers get the same payload — mirrors the module's own
+	 * send()/routeMessage() rebroadcast pattern (WebSocketSTOMP.cfc), but keeps
+	 * the exclusion and per-recipient header behaviour this file already
+	 * relies on. exceptChannelHash is deliberately never forwarded: the
+	 * excepted connection is a live Java object on this node's JVM only, so no
+	 * peer could ever hold it, and there is nothing for a peer to exclude.
 	 */
-	private function broadcastWatchlist( required string appId, required string eventName, required string userId ) {
-		var destination = appId & "." & variables.WATCHLIST_CHANNEL;
-		var payload = jsonSerialize( { "event" : eventName, "data" : { "user_id" : userId } } );
-		var subs = getSubscriptions()[ destination ] ?: {};
+	private function clusterFanOut( required string destination, required string payload, string exceptChannelHash="" ) {
+		localFanOut( destination, payload, exceptChannelHash );
 
-		for ( var key in subs.keyArray() ) {
-			var subscription = subs[ key ] ?: {};
-			try {
-				var message = newMessage(
-					"MESSAGE",
-					{ "destination" : destination, "content-type" : "application/json" },
-					payload
-				);
-				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
-				message.setHeader( "message-id", createUUID() );
-				sendMessage( getMessageParser().serialize( message ), subscription.channel );
-			} catch ( any e ) {
-				// One dead subscriber must not stop the rest being told.
-			}
+		if ( isClusterEnabled() ) {
+			broadcastManagementMessage(
+				variables.CLUSTER_FANOUT_PREFIX & jsonSerialize( { "destination" : destination, "payload" : payload } )
+			);
 		}
 	}
 
-	private string function channelNameFrom( required string appId, required string destination ) {
-		return destination.startsWith( appId & "." )
-			? destination.mid( appId.len() + 2, destination.len() )
-			: destination;
+	/** This node's own local subscriber count for a destination. */
+	private numeric function localSubscriberCount( required string destination ) {
+		return ( getSubscriptions()[ destination ] ?: {} ).count();
+	}
+
+	/**
+	 * Cluster-wide subscriber count: this node's own count plus every peer's,
+	 * fetched via RPC. A connection lives on exactly one node, so local counts
+	 * across nodes are inherently disjoint — no dedup needed, unlike presence
+	 * (see clusterPresenceMembers()). A short timeout + a defaultValue lacking
+	 * a `success` key means an unresponsive peer just contributes 0 instead of
+	 * blocking this call (and the request that triggered it) for the module's
+	 * full 15s default RPC timeout.
+	 */
+	private numeric function clusterSubscriberCount( required string destination ) {
+		var total = localSubscriberCount( destination );
+
+		if ( isClusterEnabled() ) {
+			RPCClusterRequest( "getLocalSubscriberCount", { "destination" : destination }, 2, {} )
+				.each( ( peerName, peerResponse ) => {
+					if ( peerResponse.success ?: false ) {
+						total += val( peerResponse.result.count ?: 0 );
+					}
+				} );
+		}
+
+		return total;
+	}
+
+	/**
+	 * Cluster-wide presence roster: this node's own members plus every peer's,
+	 * fetched via RPC, deduped by user_id — PresenceService.members() already
+	 * guarantees one entry per user within a node ("three tabs is one
+	 * member"); naively concatenating each peer's list would reintroduce a
+	 * duplicate for a user connected from two different nodes at once, so the
+	 * same distinct-user guarantee is re-applied across the merge. Same
+	 * short-timeout/graceful-degrade behaviour as clusterSubscriberCount().
+	 */
+	private array function clusterPresenceMembers( required string destination ) {
+		var seen = {};
+		var merged = [];
+		var addDistinct = function( required array memberList ) {
+			for ( var member in memberList ) {
+				var userId = member.user_id ?: "";
+				if ( !seen.keyExists( userId ) ) {
+					seen[ userId ] = true;
+					merged.append( member );
+				}
+			}
+		};
+
+		addDistinct( presenceService().members( destination ) );
+
+		if ( isClusterEnabled() ) {
+			RPCClusterRequest( "getLocalPresence", { "destination" : destination }, 2, {} )
+				.each( ( peerName, peerResponse ) => {
+					if ( peerResponse.success ?: false ) {
+						addDistinct( peerResponse.result.members ?: [] );
+					}
+				} );
+		}
+
+		return merged;
 	}
 
 	/* ------------------------------------------------------ client publish */
@@ -314,11 +432,14 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 			identity.userInfo
 		);
 
-		// The arriving subscriber gets the roster; everyone else gets the arrival.
+		// The arriving subscriber gets the cluster-wide roster; everyone else
+		// gets the arrival. members/count come from one call so they can never
+		// disagree with each other.
+		var clusterMembers = clusterPresenceMembers( destination );
 		sendToConnection( destination, channel, subscriptionID, "presence.subscription_succeeded", {
-			"members"  : presenceService().members( destination ),
+			"members"  : clusterMembers,
 			"me"       : result.member,
-			"count"    : presenceService().memberCount( destination )
+			"count"    : clusterMembers.len()
 		} );
 
 		if ( result.added ) {
@@ -361,33 +482,12 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 			"event" : eventName,
 			"data"  : {
 				"member" : member,
-				"count"  : presenceService().memberCount( destination )
+				"count"  : clusterPresenceMembers( destination ).len()
 			}
 		} );
 
-		var exceptId = isNull( exceptChannel ) ? "" : exceptChannel.hashCode();
-		var subs = getSubscriptions()[ destination ] ?: {};
-
-		for ( var key in subs.keyArray() ) {
-			var subscription = subs[ key ] ?: {};
-			if ( ( subscription.channelID ?: "" ) == exceptId ) {
-				continue;
-			}
-			try {
-				// subscription/message-id headers set per recipient — see the note
-				// on sendToConnection(); without them a real client drops this.
-				var message = newMessage(
-					"MESSAGE",
-					{ "destination" : destination, "content-type" : "application/json" },
-					payload
-				);
-				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
-				message.setHeader( "message-id", createUUID() );
-				sendMessage( getMessageParser().serialize( message ), subscription.channel );
-			} catch ( any e ) {
-				// A subscriber that has already gone must not stop the others being told.
-			}
-		}
+		var exceptChannelHash = isNull( exceptChannel ) ? "" : exceptChannel.hashCode();
+		clusterFanOut( destination, payload, exceptChannelHash );
 	}
 
 	/**
@@ -692,6 +792,37 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	/* --------------------------------------------------- lifecycle hooks */
 
 	/**
+	 * A fan-out forwarded from a cluster peer (see clusterFanOut()) — replay it
+	 * against this node's own local subscribers. No exceptChannelHash: the
+	 * connection excepted on the originating node is a JVM-local object that
+	 * cannot exist here (see clusterFanOut()'s comment).
+	 */
+	function onManagementMessage( required message, required channel ) {
+		if ( left( message, len( variables.CLUSTER_FANOUT_PREFIX ) ) != variables.CLUSTER_FANOUT_PREFIX ) {
+			return;
+		}
+
+		var data = jsonDeserialize( message.mid( len( variables.CLUSTER_FANOUT_PREFIX ) + 1, len( message ) ) );
+		localFanOut( data.destination, data.payload );
+	}
+
+	/**
+	 * Answers a peer's cluster-aggregation RPC with this node's own local
+	 * state (see clusterSubscriberCount() / clusterPresenceMembers()). Falls
+	 * through to super for anything not recognized here, so the module's own
+	 * operations (getSTOMPCConnections, uptime) keep working.
+	 */
+	Boolean function _onRPCRequest( required string operation, required struct args, required string id, required string peerName ) {
+		switch ( operation ) {
+			case "getLocalSubscriberCount":
+				return sendRPCResponse( id, peerName, { "count" : localSubscriberCount( args.destination ?: "" ) } );
+			case "getLocalPresence":
+				return sendRPCResponse( id, peerName, { "members" : presenceService().members( args.destination ?: "" ) } );
+		}
+		return super._onRPCRequest( arguments.operation, arguments.args, arguments.id, arguments.peerName );
+	}
+
+	/**
 	 * super.onSubscribe() always accepts a syntactically valid, same-tenant
 	 * subscribe now (see authorize()'s comment) — this is where the actual
 	 * private-/presence- channel decision happens, followed by presence entry,
@@ -912,29 +1043,7 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	}
 
 	private function fanOutExcept( required string destination, required string payload, required any exceptChannel ) {
-		var exceptId = exceptChannel.hashCode();
-		var subs = getSubscriptions()[ destination ] ?: {};
-
-		for ( var key in subs.keyArray() ) {
-			var subscription = subs[ key ] ?: {};
-			if ( ( subscription.channelID ?: "" ) == exceptId ) {
-				continue;
-			}
-			try {
-				// subscription/message-id headers set per recipient — see the note
-				// on sendToConnection(); without them a real client drops this.
-				var message = newMessage(
-					"MESSAGE",
-					{ "destination" : destination, "content-type" : "application/json" },
-					payload
-				);
-				message.setHeader( "subscription", subscription.subscriptionID ?: "" );
-				message.setHeader( "message-id", createUUID() );
-				sendMessage( getMessageParser().serialize( message ), subscription.channel );
-			} catch ( any e ) {
-				// One dead subscriber must not stop the rest being delivered to.
-			}
-		}
+		clusterFanOut( destination, payload, exceptChannel.hashCode() );
 	}
 
 	/**
