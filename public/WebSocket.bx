@@ -31,6 +31,24 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	// reserved prefixes (__message_rebroadcast__, __STOMP_message_rebroadcast__,
 	// __peer_discovered__, __rpc_request__, __rpc_response__).
 	variables.CLUSTER_FANOUT_PREFIX = "__pulsely_fanout__";
+
+	/**
+	 * The port to advertise this node's cluster peer address under.
+	 * cgi.server_port reflects whichever port the triggering request appears
+	 * to have arrived on, not necessarily the port this server is actually
+	 * bound to — behind Docker's port publishing, the first request to
+	 * trigger configure() can permanently bake in an externally-mapped port
+	 * that nothing inside the container network is listening on. The
+	 * Dockerfile already sets BOX_SERVER_WEB_HTTP_PORT to the real bound
+	 * port for health-check/routing purposes; prefer it when set. Local dev
+	 * (server.json, no such env var) keeps the cgi.server_port behavior,
+	 * which is accurate there since nothing remaps the port in front of it.
+	 */
+	private string function clusterAdvertisedPort() {
+		var envPort = createObject( "java", "java.lang.System" ).getenv( "BOX_SERVER_WEB_HTTP_PORT" );
+		return ( !isNull( envPort ) && len( envPort ) ) ? envPort : cgi.server_port;
+	}
+
     function configure(){
         return {
             "debugMode": false,
@@ -41,7 +59,7 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
                 // This can be any string-- a GUID is fine.  Just generate it once and ensure all servers in the cluster use the same secret key.
                 "secretKey" : "44ea1048-d1ee-4a55-a9c8-1ab93acd0df4",
                 // address for other servers to connect to this node
-                "name" : "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#cgi.server_port#/ws",
+                "name" : "ws://#createObject("java", "java.net.InetAddress").getLocalHost().getHostName()#:#clusterAdvertisedPort()#/ws",
                 // A class or object with MINIMUM get(), set(), and clear() methods to use as a cache provider.
                 // A CacheBox provider is perfect for this and offers disk, JDBC, CF/Lucee, Couchbase, Redis, or Memcached backends.
                 // You can also provide your own custom cache provider as long as it has get(), set(), and clear() methods.
@@ -151,8 +169,8 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 	 * Unlike subscription counts / presence, this carries no aggregated number —
 	 * just an identity and an event name — so cluster-wide delivery is all it
 	 * needs. wasFirstConnection/wasLastConnection (WatchlistService.bx) are
-	 * still decided from local-only state, so a user connecting from a second
-	 * node can still re-fire watchlist.online; see docs/socketbox-cluster-todo.md.
+	 * still decided from local-only state, so callers check isOnlineOnAnyPeer()
+	 * before invoking this — see handleSignin() / onClose().
 	 */
 	private function broadcastWatchlist( required string appId, required string eventName, required string userId ) {
 		var destination = appId & "." & variables.WATCHLIST_CHANNEL;
@@ -283,6 +301,31 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 		}
 
 		return merged;
+	}
+
+	/**
+	 * Whether a user is already signed in via any OTHER node — checked after
+	 * this node's own local signIn()/signOut() so it's only ever asking about
+	 * peers, never racing against this node's own just-written state. Used to
+	 * suppress watchlist.online/offline broadcasts that would otherwise fire
+	 * every time the same user's Nth connection happens to land on a node
+	 * that has none of their other connections (see broadcastWatchlist()).
+	 * Same short-timeout/graceful-degrade behaviour as
+	 * clusterSubscriberCount() — an unresponsive peer just doesn't count as
+	 * "online there", it doesn't block this call.
+	 */
+	private boolean function isOnlineOnAnyPeer( required string appId, required string userId ) {
+		if ( !isClusterEnabled() ) {
+			return false;
+		}
+		var foundOnPeer = false;
+		RPCClusterRequest( "getLocalWatchlistOnline", { "appId" : appId, "userId" : userId }, 2, {} )
+			.each( ( peerName, peerResponse ) => {
+				if ( ( peerResponse.success ?: false ) && ( peerResponse.result.online ?: false ) ) {
+					foundOnPeer = true;
+				}
+			} );
+		return foundOnPeer;
 	}
 
 	/* ------------------------------------------------------ client publish */
@@ -818,6 +861,8 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 				return sendRPCResponse( id, peerName, { "count" : localSubscriberCount( args.destination ?: "" ) } );
 			case "getLocalPresence":
 				return sendRPCResponse( id, peerName, { "members" : presenceService().members( args.destination ?: "" ) } );
+			case "getLocalWatchlistOnline":
+				return sendRPCResponse( id, peerName, { "online" : watchlistService().isOnline( args.appId ?: "", args.userId ?: "" ) } );
 		}
 		return super._onRPCRequest( arguments.operation, arguments.args, arguments.id, arguments.peerName );
 	}
@@ -937,7 +982,10 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 		connectionMetadata.userId = identity.userId;
 
 		var result = watchlistService().signIn( appId, identity.userId, channel.hashCode() );
-		if ( result.wasFirstConnection ) {
+		// wasFirstConnection only means "first on THIS node" — check peers
+		// before announcing online, or a user already online via another
+		// node re-fires watchlist.online on every extra connection.
+		if ( result.wasFirstConnection && !isOnlineOnAnyPeer( appId, identity.userId ) ) {
 			broadcastWatchlist( appId, "watchlist.online", identity.userId );
 		}
 
@@ -1094,8 +1142,10 @@ class extends="modules.socketbox.models.WebSocketSTOMP" {
 
 			// A dropped socket never signs out either — same reasoning as the
 			// presence cleanup above, just app-wide instead of per-channel.
+			// wasLastConnection only means "last on THIS node" — check peers
+			// before announcing offline, see the matching note in handleSignin().
 			for ( var departure in watchlistService().signOutAllForConnection( appId, channel.hashCode() ) ) {
-				if ( departure.wasLastConnection ) {
+				if ( departure.wasLastConnection && !isOnlineOnAnyPeer( appId, departure.userId ) ) {
 					broadcastWatchlist( appId, "watchlist.offline", departure.userId );
 				}
 			}

@@ -1,10 +1,13 @@
-# SocketBox clustering — remaining known gaps
+# SocketBox clustering — history
 
-Status: `public/WebSocket.bx` implements cross-node delivery and
-count/roster aggregation for client events, subscription counts, and
-presence, following the module's own `send()`/`routeMessage()` rebroadcast
-pattern and `getClusterSTOMPConnections()` RPC-aggregation pattern. Written
-2026-07-31.
+Status: all items originally tracked here are resolved or corrected as of
+2026-08-01. `public/WebSocket.bx` implements cross-node delivery and
+count/roster aggregation for client events, subscription counts, presence,
+and watchlist online/offline, following the module's own
+`send()`/`routeMessage()` rebroadcast pattern and
+`getClusterSTOMPConnections()` RPC-aggregation pattern. Kept as a record of
+what was found and how it was fixed, in case any of it regresses or a
+similar issue shows up elsewhere in the module.
 
 ## RESOLVED (2026-08-01) — cluster peer connections did not stay stable
 
@@ -48,73 +51,78 @@ that file) — it silently never ran before because no management message
 ever reached it; once delivery started working, this surfaced immediately
 as a real, easy-to-diagnose stack trace and was fixed in the same pass.
 
-## Still open
+## RESOLVED (2026-08-01) — host-published-port fragility
 
-**The host-published-port fragility noted during the investigation above is
-still real** and worth its own fix eventually: `getDefaultClusterName()` in
-`WebSocketCore.cfc` derives a node's advertised cluster peer name from
-`cgi.server_port`/the triggering request's own Host header, rather than the
-actual bound listener port. In Docker, triggering the first configuring
-request via a host-published port (e.g. `curl localhost:18085`) bakes that
-*external* port into the node's self-advertised name instead of the real
-internal one (`8080`), and other nodes then try to dial a port nothing
-inside the container network is listening on. Must trigger via `docker exec
-<container> curl ...` from inside the container instead — see
-`java/socketbox-shim/README.md`'s neighbor, `docker-compose.cluster-test.yml`,
-for the working incantation. Not fixed in this pass; scoped separately from
-the peer-connection-stability fix above.
+`public/WebSocket.bx`'s cluster `name` computation derived the advertised
+port from `cgi.server_port` — the port the *triggering request* appeared to
+arrive on, not necessarily the server's real bound port. In Docker,
+triggering the first configuring request via a host-published port (e.g.
+`curl localhost:18085`) baked that *external* port into the node's
+self-advertised name instead of the real internal one (`8080`), and other
+nodes then tried to dial a port nothing inside the container network was
+listening on — the reason the earlier verification had to trigger the first
+request via `docker exec <container> curl ...` from inside the container.
 
-## Watchlist online/offline can double-fire across nodes
+**Fix**: `clusterAdvertisedPort()` (`public/WebSocket.bx`) now prefers the
+`BOX_SERVER_WEB_HTTP_PORT` env var when set — the `Dockerfile` already sets
+this to the real bound port for health-check/routing purposes, so reusing
+it needed no new infrastructure — falling back to `cgi.server_port` for
+local dev, where it's accurate since nothing remaps the port in front of
+it. The `docker exec`-from-inside-the-container workaround is no longer
+necessary as a result.
 
-`app/models/WatchlistService.bx`'s `signIn()` / `signOutAllForConnection()`
-decide `wasFirstConnection` / `wasLastConnection` by reading the
-`pulselyWatchlist` cache, which — like `pulselyPresence` — is local to the
-node's JVM, not shared across the cluster.
+## RESOLVED (2026-08-01) — watchlist online/offline double-fire
 
-If a user is already signed in via a connection on node A and opens a
-second connection on node B, node B's `signIn()` has no visibility into
-node A's state, so it also reports `wasFirstConnection = true` and
-`broadcastWatchlist()` (`public/WebSocket.bx`) re-fires `watchlist.online`
-for a user who was already online. The symmetric case applies to
-`watchlist.offline` on disconnect.
+`app/models/WatchlistService.bx`'s `signIn()`/`signOutAllForConnection()`
+decide `wasFirstConnection`/`wasLastConnection` from the local-only
+`pulselyWatchlist` cache, so a user already online via node A got a
+duplicate `watchlist.online` when they connected to node B.
 
-This isn't fixable by read-time aggregation the way subscription counts and
-presence rosters were (see `clusterSubscriberCount()` /
-`clusterPresenceMembers()` in `public/WebSocket.bx`) — it needs the
-sign-in/sign-out decision itself to check peers *before* deciding
-`wasFirstConnection`/`wasLastConnection`, most likely via the same
-`RPCClusterRequest()` pattern (e.g. a `getLocalWatchlistStatus` RPC
-operation), with the actual first/last-connection bookkeeping in
-`WatchlistService.bx` changed to be cluster-aware rather than just its
-callers.
+**Fix**: `isOnlineOnAnyPeer()` (`public/WebSocket.bx`), mirroring
+`clusterSubscriberCount()`'s RPC-aggregation pattern exactly (new
+`getLocalWatchlistOnline` case in `_onRPCRequest()`, backed by
+`WatchlistService.isOnline()` which already existed and needed no changes).
+`handleSignin()`/`onClose()` now check it *after* the local sign-in/out
+call, before broadcasting — only ever asking about *other* peers, never
+racing against this node's own just-written state. `WatchlistService.bx`
+itself is unchanged.
 
-## First-connection concurrency race in the socketbox module itself
+Known residual edge case, not solved here: if the very first connections
+for the same user land on two different nodes in the same instant, both
+could complete their peer-check before the other's local write lands,
+producing a double `watchlist.online` in that narrow window. A large
+improvement over always-double-firing, not a claim of perfect distributed
+consistency.
 
-Found while fixing the `pulselyClusterPeers` cache-region collision: on a
-cold server, the very first WebSocket handshake can trigger `_configure()`
-from more than one concurrent request path, so two `ClusterManager`
-instances both try to start a thread named `SocketBoxClusterManager` and
-both try to insert the same peer-registration row —
+## CORRECTED (2026-08-01) — the two items below were not real bugs
 
-```
-SocketBox error during configuration: Duplicate entry '...' for key 'pulselyclusterpeers.PRIMARY'
-SocketBox error during configuration: Thread name [SocketBoxClusterManager] already in use for this request.
-```
+Re-investigated before attempting a fix. Both turned out to be based on a
+false diagnosis — most likely symptoms of this project's own rapid
+test-restart churn during the original investigation, not code defects.
+Recorded here so nobody re-investigates them from the same false premise.
 
-This is a gap in `lib/modules/socketbox/models/WebSocketCore.cfc`'s
-`reloadCheck()`/`_configure()` (missing a lock around first-time
-configuration), not something specific to Pulsely's own config. Left alone
-per explicit instruction when the cache-region collision was fixed —
-revisit if it causes visible startup errors in practice (it's a one-time
-race on cold start, not an ongoing issue once configured).
+**"First-connection concurrency race"**: `WebSocketCore.cfc`'s
+`reloadCheck()` already wraps the configure-decision in
+`cflock(name="SocketBoxInit", type="exclusive", timeout=60)` with correct
+double-checked locking — a thread that blocks on the lock re-checks
+`structKeyExists(application, "SocketBoxConfig")` live after acquiring it,
+and correctly skips `_configure()` if another thread already ran it. The
+`Duplicate entry`/`Thread name already in use` errors originally observed
+are much better explained by the investigation's own repeated rapid server
+restarts leaving stale rows in the shared `pulselyClusterPeers` table from
+earlier, ungracefully-killed JVM incarnations of the same node — a node
+restarting under the same peer name within `peerIdleTimeoutSeconds` (60s
+default) of its own prior, uncleanly-terminated life hits a duplicate-key
+error on its *own* stale row, regardless of any in-process locking. That's
+a real, narrow, genuinely different operational edge case (a node
+crash-and-fast-restart) than "missing a lock" — worth a small defensive
+improvement someday (have a node clear its own prior registration on
+startup before re-registering, via `patches/socketbox/`), but not urgent
+and not what was originally diagnosed.
 
-## `RPCClusterRequest()` is serial, not concurrent
-
-`WebSocketCore.cfc`'s `RPCClusterRequest()` (used by
-`clusterSubscriberCount()` and `clusterPresenceMembers()` in
-`public/WebSocket.bx`) iterates peers one at a time — each `RPCRequest()`
-call blocks (up to its timeout) before the next peer is asked. Both new
-aggregation helpers pass a short 2-second per-peer timeout specifically to
-bound this, but latency still scales linearly with peer count in the worst
-case (all peers slow/unresponsive). Fine for a small cluster; worth
-revisiting (e.g. fanning out concurrently) if the cluster grows large.
+**"`RPCClusterRequest()` is serial, not concurrent"**: `RPCClusterRequest()`
+calls `.map((peerName, peerConnection) => {...}, true)`. That trailing
+`true` is BoxLang's `parallel` argument — confirmed by decompiling the
+installed runtime's `StructMap`/`StructEach` BIF classes
+(`(struct, callback, parallel, maxThreads, virtual/ordered)`). This is
+genuine parallel dispatch across peers already, not serial. No fix needed.
